@@ -364,9 +364,45 @@ namespace thor::vmx {
 				infoLogger() << "vmx: hlt" << frg::endlog;
 				exitInfo.exitReason = kHelVmexitHlt;
 				return exitInfo;
+			} else if(reason == VMEXIT_IO_INSTRUCTION) {
+				infoLogger() << "vmx: io-instruction exit" << frg::endlog;
+				uint64_t exitFlags = vmread(EXIT_QUALIFICATION);
+				uint64_t instructionLength = vmread(VM_INSTRUCTION_LENGTH);
+
+				HelX86VirtualizationRegs regs;
+				loadRegs(&regs);
+				regs.rip += instructionLength;
+				storeRegs(&regs);
+
+				exitInfo.exitReason = kHelVmexitIo;
+				exitInfo.address = exitFlags >> 16;
+
+				if((exitFlags >> 3) & 1)
+					exitInfo.flags = kHelIoRead;
+				else
+					exitInfo.flags = kHelIoWrite;
+
+				switch(exitFlags & 0x7) {
+					case 0:
+						exitInfo.flags |= kHelIoWidth8;
+						break;
+					case 1:
+						exitInfo.flags |= kHelIoWidth16;
+						break;
+					case 2:
+						exitInfo.flags |= kHelIoWidth32;
+						break;
+					case 3:
+						exitInfo.flags |= kHelIoWidth64;
+						break;
+					default:
+						__builtin_unreachable();
+				}
+
+				return exitInfo;
 			} else if(reason == VMEXIT_EPT_VIOLATION) {
 				size_t address = vmread(EPT_VIOLATION_ADDRESS);
-				size_t exitFlags = vmread(EPT_VIOLATION_FLAGS);
+				size_t exitFlags = vmread(EXIT_QUALIFICATION);
 				uint32_t flags = 0;
 				if(exitFlags & 1)
 					flags |= AddressSpace::kFaultWrite;
@@ -426,10 +462,25 @@ namespace thor::vmx {
 		vmwrite(GUEST_IDTR_BASE, regs->idt.base);
 		vmwrite(GUEST_IDTR_LIMIT, regs->idt.base);
 
+		uint64_t cr0Fixed = common::x86::rdmsr(IA32_VMX_CR0_FIXED0_MSR);
+		cr0Fixed &= ~(1 << 0); // disable PE
+		cr0Fixed &= ~(1 << 31); // disable PG
+		vmwrite(GUEST_CR0, cr0Fixed | regs->cr0);
 
-		vmwrite(GUEST_CR0, regs->cr0);
+		uint64_t cr4Fixed = common::x86::rdmsr(IA32_VMX_CR4_FIXED0_MSR);
+		vmwrite(GUEST_CR4, cr4Fixed | regs->cr4);
+
 		vmwrite(GUEST_CR3, regs->cr3);
-		vmwrite(GUEST_CR4, regs->cr4);
+
+		if(regs->efer & (1 << 10)) {
+			uint64_t vmEntryCtrls = common::x86::rdmsr(0x484);
+			vmEntryCtrls |= 1 << 9; // IA-32e mode guest
+			vmwrite(VM_ENTRY_CONTROLS, vmEntryCtrls);
+		} else {
+			uint64_t vmEntryCtrls = common::x86::rdmsr(0x484);
+			vmEntryCtrls &= ~(1 << 9); // IA-32e mode guest
+			vmwrite(VM_ENTRY_CONTROLS, vmEntryCtrls);
+		}
 
 		vmwrite(VMCS_FIELD_GUEST_EFER_FULL, regs->efer);
 	}
@@ -454,7 +505,7 @@ namespace thor::vmx {
                 regs->segment.l = (seg >> 13) & 1; \
                 regs->segment.db = (seg >> 14) & 1; \
                 regs->segment.g = (seg >> 15) & 1; \
-            } 
+            }
 
 		GET_SEGMENT(cs, CS);
 		GET_SEGMENT(ds, DS);

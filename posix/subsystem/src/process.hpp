@@ -94,6 +94,14 @@ public:
 			return _it->second.nativeFlags & kHelMapProtExecute;
 		}
 
+		helix::BorrowedDescriptor fileView() {
+			return _it->second.fileView;
+		}
+
+		helix::BorrowedDescriptor copyView() {
+			return _it->second.copyView;
+		}
+
 		smarter::borrowed_ptr<File, FileHandle> backingFile() {
 			return _it->second.file;
 		}

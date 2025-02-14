@@ -779,3 +779,172 @@ head(128):
 	int32 number;
 	uint64 optlen;
 }
+
+message KvmGetApiVersionRequest 28 {
+head(128):
+}
+
+message KvmGetApiVersionReply 29 {
+head(128):
+	uint32 api_version;
+}
+
+message KvmCreateVmRequest 30 {
+head(128):
+	uint32 machine_type;
+}
+
+message KvmCreateVmReply 31 {
+head(128):
+	Errors error;
+	int32 vm_fd;
+}
+
+message KvmCreateVcpuRequest 32 {
+head(128):
+	uint32 vcpu_id;
+}
+
+message KvmCreateVcpuReply 33 {
+head(128):
+	Errors error;
+	int32 vcpu_fd;
+}
+
+message KvmSetMemoryRegionRequest 34 {
+head(128):
+	uint32 slot;
+	uint32 flags;
+	uint64 user_addr;
+	uint64 guest_phys_addr;
+	uint64 memory_size;
+}
+
+message KvmSetMemoryRegionReply 35 {
+head(128):
+	Errors error;
+}
+
+message KvmGetVcpuMmapSizeRequest 36 {
+head(128):
+}
+
+message KvmGetVcpuMmapSizeReply 37 {
+head(128):
+	uint32 mmap_size;
+}
+
+struct KvmSegment {
+	uint64 base;
+	uint32 limit;
+	uint16 selector;
+	uint8 type;
+	uint8 present;
+	uint8 dpl;
+	uint8 db;
+	uint8 s;
+	uint8 l;
+	uint8 g;
+	uint8 avl;
+}
+
+struct KvmDtable {
+	uint64 base;
+	uint16 limit;
+}
+
+struct KvmSpecialRegs {
+	KvmSegment cs;
+	KvmSegment ds;
+	KvmSegment es;
+	KvmSegment fs;
+	KvmSegment gs;
+	KvmSegment ss;
+	KvmSegment tr;
+	KvmSegment ldt;
+	KvmDtable gdt;
+	KvmDtable idt;
+	uint64 cr0;
+	uint64 cr2;
+	uint64 cr3;
+	uint64 cr4;
+	uint64 cr8;
+	uint64 efer;
+	uint64 apic_base;
+}
+
+struct KvmRegisters {
+	uint64 rax;
+	uint64 rbx;
+	uint64 rcx;
+	uint64 rdx;
+	uint64 rsi;
+	uint64 rdi;
+	uint64 rsp;
+	uint64 rbp;
+	uint64 r8;
+	uint64 r9;
+	uint64 r10;
+	uint64 r11;
+	uint64 r12;
+	uint64 r13;
+	uint64 r14;
+	uint64 r15;
+	uint64 rip;
+	uint64 rflags;
+}
+
+message KvmVcpuGetRegistersRequest 38 {
+head(128):
+}
+
+message KvmVcpuGetRegistersReply 39 {
+head(128):
+	Errors error;
+tail:
+	KvmRegisters regs;
+}
+
+message KvmVcpuSetRegistersRequest 40 {
+head(128):
+tail:
+	KvmRegisters regs;
+}
+
+message KvmVcpuSetRegistersReply 41 {
+head(128):
+	Errors error;
+}
+
+message KvmVcpuGetSpecialRegistersRequest 42 {
+head(128):
+}
+
+message KvmVcpuGetSpecialRegistersReply 43 {
+head(128):
+	Errors error;
+tail:
+	KvmSpecialRegs regs;
+	uint8[] interrupt_bitmap;
+}
+
+message KvmVcpuSetSpecialRegistersRequest 44 {
+head(128):
+tail:
+	KvmSpecialRegs regs;
+	uint8[] interrupt_bitmap;
+}
+
+message KvmVcpuSetSpecialRegistersReply 45 {
+head(128):
+	Errors error;
+}
+
+message KvmVcpuRunRequest 46 {
+head(128):
+}
+
+message KvmVcpuRunReply 47 {
+head(128):
+	Errors error;
+}

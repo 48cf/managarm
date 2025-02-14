@@ -6,6 +6,7 @@ src = [
 	'src/devices/full.cpp',
 	'src/devices/helout.cpp',
 	'src/devices/kmsg.cpp',
+	'src/devices/kvm.cpp',
 	'src/devices/null.cpp',
 	'src/devices/random.cpp',
 	'src/devices/urandom.cpp',

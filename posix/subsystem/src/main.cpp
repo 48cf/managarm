@@ -8,6 +8,7 @@
 #include "devices/full.hpp"
 #include "devices/helout.hpp"
 #include "devices/kmsg.hpp"
+#include "devices/kvm.hpp"
 #include "devices/null.hpp"
 #include "devices/random.hpp"
 #include "devices/urandom.hpp"
@@ -197,6 +198,19 @@ int main() {
 	charRegistry.install(createUrandomDevice());
 	charRegistry.install(createZeroDevice());
 	charRegistry.install(createKmsgDevice());
+
+#if defined(__x86_64__)
+	HelHandle vm_space;
+	if(helCreateVirtualizedSpace(&vm_space) == kHelErrNone) {
+		auto result = helCloseDescriptor(kHelThisUniverse, vm_space);
+		HEL_CHECK(result);
+		charRegistry.install(createKvmDevice());
+	} else {
+		std::cout << "\e[31mposix: Host does not support virtualization\e[39m" << std::endl;
+	}
+#else
+	std::cout << "\e[31mposix: Virtualization is not supported on this platform\e[39m" << std::endl;
+#endif
 
 	acpi_subsystem::run();
 	drm_subsystem::run();

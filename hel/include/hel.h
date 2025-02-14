@@ -569,9 +569,21 @@ struct HelThreadStats {
 
 enum {
   kHelVmexitHlt = 0,
-  kHelVmexitTranslationFault = 1,
+  kHelVmexitIo = 1,
+  kHelVmexitTranslationFault = 2,
   kHelVmexitError = -1,
   kHelVmexitUnknownPlatformSpecificExitCode = -2,
+};
+
+enum {
+	kHelIoRead = 1 << 0,
+	kHelIoWrite = 1 << 1,
+	kHelIoFlagString = 1 << 2,
+	kHelIoStringRep = 1 << 3,
+	kHelIoWidth8 = 1 << 4,
+	kHelIoWidth16 = 2 << 4,
+	kHelIoWidth32 = 3 << 4,
+	kHelIoWidth64 = 4 << 4,
 };
 
 struct HelVmexitReason {

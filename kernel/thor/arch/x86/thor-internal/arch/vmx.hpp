@@ -115,8 +115,9 @@ namespace thor::vmx {
 	constexpr uint64_t GUEST_PML_INDEX                   = 0x00000812;
 	constexpr uint64_t VM_EXIT_REASON                    = 0x00004402;
 	constexpr uint64_t VM_INSTRUCTION_ERROR              = 0x00004400;
+	constexpr uint64_t VM_INSTRUCTION_LENGTH             = 0x0000440C;
 	constexpr uint64_t EPT_VIOLATION_ADDRESS             = 0x00002400;
-	constexpr uint64_t EPT_VIOLATION_FLAGS               = 0x00006400;
+	constexpr uint64_t EXIT_QUALIFICATION                = 0x00006400;
 
 	constexpr uint64_t DATA_ACCESS_RIGHT = (0x3 | 1 << 4 | 1 << 7);
 	constexpr uint64_t CODE_ACCESS_RIGHT = (0x3 | 1 << 4 | 1 << 7 | 1 << 13);
@@ -125,6 +126,7 @@ namespace thor::vmx {
 
 	constexpr uint64_t VMEXIT_EXTERNAL_INTERRUPT           = 1;
 	constexpr uint64_t VMEXIT_HLT                          = 12;
+	constexpr uint64_t VMEXIT_IO_INSTRUCTION               = 30;
 	constexpr uint64_t VMEXIT_EPT_VIOLATION                = 48;
 
 	constexpr uint64_t VMEXIT_CONTROLS_LONG_MODE      = 1 << 9;
@@ -149,7 +151,7 @@ namespace thor::vmx {
 		HelVmexitReason run();
 		void storeRegs(const HelX86VirtualizationRegs *regs);
 		void loadRegs(HelX86VirtualizationRegs *res);
-		
+
 		void *region;
 		uint8_t* hostFstate;
 		uint8_t* guestFstate;

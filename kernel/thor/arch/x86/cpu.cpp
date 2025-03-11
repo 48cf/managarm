@@ -434,21 +434,23 @@ static initgraph::Task enumerateCpuFeaturesTask{&globalInitEngine, "x86.enumerat
 
 		// Check that both VMX and EPT are supported.
 		bool vmxSupported = [] () -> bool {
+			auto leaf = common::x86::cpuid(common::x86::kCpuIndexFeatures);
 			// Test for VMX.
-			if(!(common::x86::cpuid(0x1)[2] & (1 << 5)))
+			if(!(leaf[2] & common::x86::kCpuFlagVmx))
 				return false;
 			// Test for secondary processor-based controls.
-			auto procBased = common::x86::rdmsr(0x482);
-			if(!((procBased >> 32) & (1 << 31)))
+			auto procBased = common::x86::rdmsr(common::x86::kMsrVmxProcBasedCtls);
+			if(!((procBased >> 32) & common::x86::kVmxProcBasedCtlActivateSecondaryCtls))
 				return false;
 			// Test for EPT support and unrestricted guests.
-			auto procBased2 = common::x86::rdmsr(0x48B);
-			if(!((procBased2 >> 32) & (1 << 1)))
+			auto procBased2 = common::x86::rdmsr(common::x86::kMsrVmxProcBasedCtls2);
+			if(!((procBased2 >> 32) & common::x86::kVmxProcBasedCtl2EnableEpt))
 				return false;
-			if(!((procBased2 >> 32) & (1 << 7)))
+			if(!((procBased2 >> 32) & common::x86::kVmxProcBasedCtl2UnrestrictedGuest))
 				return false;
 			// Test if page walks of length 4 are supported by EPT.
-			if(!(common::x86::rdmsr(0x48C) & (1 << 6)))
+			auto eptCap = common::x86::rdmsr(common::x86::kMsrVmxEptVpidCap);
+			if(!(eptCap & common::x86::kEptCapPageWalkLength4))
 				return false;
 			return true;
 		}(); // Immediately invoked.
@@ -457,7 +459,7 @@ static initgraph::Task enumerateCpuFeaturesTask{&globalInitEngine, "x86.enumerat
 			auto leaf = common::x86::cpuid(common::x86::kCpuIndexExtendedFeatures);
 			if(!(leaf[2] & (1 << 2)))
 				return false; // Unsupported
-			
+
 			auto vm_cr = common::x86::rdmsr(common::x86::kMsrIndexVmCr);
 			if(vm_cr & (1 << 4)) {
 				if(leaf[3] & (1 << 2)) {
@@ -707,7 +709,7 @@ void initializeThisProcessor() {
 
 	// Enable SVM or VMX if it is supported.
 	if(getGlobalCpuFeatures()->haveVmx)
-		cpuData->haveVirtualization = thor::vmx::vmxon();
+		cpuData->haveVirtualization = thor::vmx::initialize();
 
 	if(getGlobalCpuFeatures()->haveSvm)
 		cpuData->haveVirtualization = thor::svm::init();

@@ -34,7 +34,7 @@ namespace thor::svm {
 
 		// Bitmap of exceptions that should be intercepted
 		vmcb->iceptExceptions = (1 << 1) | (1 << 6) | (1 << 14) | (1 << 17) | (1 << 18);
-		
+
 		vmcb->iceptCrWrites = (1 << 8);
 
 		vmcb->iceptVmrun = 1;
@@ -90,7 +90,7 @@ namespace thor::svm {
 		vmcb->dr7 = 0x400; // State at reset
 
 
-		auto simd_state_size = Executor::determineSimdSize(); 
+		auto simd_state_size = Executor::determineSimdSize();
 
 		host_fpu_state = (uint8_t *)kernelAlloc->allocate(simd_state_size);
 		assert(reinterpret_cast<VirtualAddr>(host_fpu_state) != static_cast<VirtualAddr>(-1) && "OOM");
@@ -147,12 +147,12 @@ namespace thor::svm {
 			switch(code) {
 			default:
 				infoLogger() << "svm: Unknown exitcode: " << code << frg::endlog;
-				reason.exitReason = kHelVmexitUnknownPlatformSpecificExitCode;
+				reason.exitReason = kHelVmExitUnknownPlatformSpecificExitCode;
 				reason.code = code;
 				return reason;
 
 			case kSvmExitHlt:
-				reason.exitReason = kHelVmexitHlt;
+				reason.exitReason = kHelVmExitHlt;
 				return reason;
 
 			case kSvmExitNPTFault: {
@@ -167,17 +167,17 @@ namespace thor::svm {
 				auto faultOutcome = Thread::asyncBlockCurrent(space->handleFault(address, flags,
 						getCurrentThread()->mainWorkQueue()->take()));
 				if(!faultOutcome) {
-					reason.exitReason = kHelVmexitTranslationFault;
+					reason.exitReason = kHelVmExitTranslationFault;
 					reason.address = address;
 					reason.flags = exitFlags;
 					return reason;
 				}
-				
+
 				break;
 			}
 
 			case static_cast<uint32_t>(~0): // Invalid VMCB
-				reason.exitReason = kHelVmexitError;
+				reason.exitReason = kHelVmExitError;
 				return reason;
 			}
 		}
@@ -297,5 +297,5 @@ namespace thor::svm {
 		SET_SEGMENT(tr);
 	}
 
-	
+
 }

@@ -8,381 +8,548 @@
 #include <x86/machine.hpp>
 
 namespace {
-	inline int vmptrld(PhysicalAddr vmcs) {
-		uint8_t ret;
-		asm volatile (
-			"vmptrld %[pa];"
-			"setna %[ret];"
-			: [ret]"=rm"(ret)
-			: [pa]"m"(vmcs)
-			: "cc", "memory");
-		return ret;
+	enum {
+		kVmEntryCtlsIa32eModeGuest = 1 << 9,
+		kVmEntryCtlsLoadIa32Pat = 1 << 14,
+		kVmEntryCtlsLoadIa32Efer = 1 << 15,
+	};
+
+	enum {
+		kVmExitCtlsHostAddrSpaceSize = 1 << 9,
+		kVmExitCtlsSaveIa32Pat = 1 << 18,
+		kVmExitCtlsLoadIa32Pat = 1 << 19,
+		kVmExitCtlsSaveIa32Efer = 1 << 20,
+		kVmExitCtlsLoadIa32Efer = 1 << 21,
+	};
+
+	enum {
+		kVmcsGuestEsSelector = 0x800,
+		kVmcsGuestCsSelector = 0x802,
+		kVmcsGuestSsSelector = 0x804,
+		kVmcsGuestDsSelector = 0x806,
+		kVmcsGuestFsSelector = 0x808,
+		kVmcsGuestGsSelector = 0x80A,
+		kVmcsGuestLdtrSelector = 0x80C,
+		kVmcsGuestTrSelector = 0x80E,
+
+		kVmcsHostEsSelector = 0xC00,
+		kVmcsHostCsSelector = 0xC02,
+		kVmcsHostSsSelector = 0xC04,
+		kVmcsHostDsSelector = 0xC06,
+		kVmcsHostFsSelector = 0xC08,
+		kVmcsHostGsSelector = 0xC0A,
+		kVmcsHostTrSelector = 0xC0C,
+
+		kVmcsEptPointerFull = 0x201A,
+		kVmcsEptPointerHigh = 0x201B,
+
+		kVmcsGuestPhysAddrFull = 0x2400,
+		kVmcsGuestPhysAddrHigh = 0x2401,
+
+		kVmcsLinkFull = 0x2800,
+		kVmcsLinkHigh = 0x2801,
+		kVmcsGuestIa32PatFull = 0x2804,
+		kVmcsGuestIa32PatHigh = 0x2805,
+		kVmcsGuestIa32EferFull = 0x2806,
+		kVmcsGuestIa32EferHigh = 0x2807,
+
+		kVmcsHostIa32PatFull = 0x2C00,
+		kVmcsHostIa32PatHigh = 0x2C01,
+		kVmcsHostIa32EferFull = 0x2C02,
+		kVmcsHostIa32EferHigh = 0x2C03,
+
+		kVmcsPinBasedCtls = 0x4000,
+		kVmcsPrimaryProcBasedCtls = 0x4002,
+		kVmcsExceptionBitmap = 0x4004,
+		kVmcsPageFaultErrorCodeMask = 0x4006,
+		kVmcsPageFaultErrorCodeMatch = 0x4008,
+		kVmcsCr3TargetCount = 0x400A,
+		kVmcsVmExitCtls = 0x400C,
+		kVmcsVmExitMsrStoreCount = 0x400E,
+		kVmcsVmExitMsrLoadCount = 0x4010,
+		kVmcsVmEntryCtls = 0x4012,
+		kVmcsVmEntryMsrLoadCount = 0x4014,
+		kVmcsVmEntryInterruptInfo = 0x4016,
+		kVmcsVmEntryExceptionErrorCode = 0x4018,
+		kVmcsVmEntryInstructionLength = 0x401A,
+		kVmcsSecondaryProcBasedCtls = 0x401E,
+
+		kVmcsVmInstructionError = 0x4400,
+		kVmcsExitReason = 0x4402,
+		kVmcsVmExitInterruptionInfo = 0x4404,
+		kVmcsVmExitInterruptionErrorCode = 0x4406,
+		kVmcsIdtVectoringInfo = 0x4408,
+		kVmcsIdtVectoringErrorCode = 0x440A,
+		kVmcsVmExitInstructionLength = 0x440C,
+		kVmcsVmExitInstructionInfo = 0x440E,
+
+		kVmcsGuestEsLimit = 0x4800,
+		kVmcsGuestCsLimit = 0x4802,
+		kVmcsGuestSsLimit = 0x4804,
+		kVmcsGuestDsLimit = 0x4806,
+		kVmcsGuestFsLimit = 0x4808,
+		kVmcsGuestGsLimit = 0x480A,
+		kVmcsGuestLdtrLimit = 0x480C,
+		kVmcsGuestTrLimit = 0x480E,
+		kVmcsGuestGdtrLimit = 0x4810,
+		kVmcsGuestIdtrLimit = 0x4812,
+		kVmcsGuestEsAccessRights = 0x4814,
+		kVmcsGuestCsAccessRights = 0x4816,
+		kVmcsGuestSsAccessRights = 0x4818,
+		kVmcsGuestDsAccessRights = 0x481A,
+		kVmcsGuestFsAccessRights = 0x481C,
+		kVmcsGuestGsAccessRights = 0x481E,
+		kVmcsGuestLdtrAccessRights = 0x4820,
+		kVmcsGuestTrAccessRights = 0x4822,
+		kVmcsGuestInterruptibility = 0x4824,
+		kVmcsGuestActivityState = 0x4826,
+		kVmcsGuestSysenterCs = 0x482A,
+
+		kVmcsHostIa32SysenterCs = 0x4C00,
+
+		kVmcsCr0Mask = 0x6000,
+		kVmcsCr4Mask = 0x6002,
+		kVmcsCr0Shadow = 0x6004,
+		kVmcsCr4Shadow = 0x6006,
+		kVmcsCr3Target0 = 0x6008,
+		kVmcsCr3Target1 = 0x600A,
+		kVmcsCr3Target2 = 0x600C,
+		kVmcsCr3Target3 = 0x600E,
+
+		kVmcsExitQualification = 0x6400,
+		kVmcsIoRcx = 0x6402,
+		kVmcsIoRsi = 0x6404,
+		kVmcsIoRdi = 0x6406,
+		kVmcsIoRip = 0x6408,
+		kVmcsGuestLinearAddress = 0x640A,
+
+		kVmcsGuestCr0 = 0x6800,
+		kVmcsGuestCr3 = 0x6802,
+		kVmcsGuestCr4 = 0x6804,
+		kVmcsGuestEsBase = 0x6806,
+		kVmcsGuestCsBase = 0x6808,
+		kVmcsGuestSsBase = 0x680A,
+		kVmcsGuestDsBase = 0x680C,
+		kVmcsGuestFsBase = 0x680E,
+		kVmcsGuestGsBase = 0x6810,
+		kVmcsGuestLdtrBase = 0x6812,
+		kVmcsGuestTrBase = 0x6814,
+		kVmcsGuestGdtrBase = 0x6816,
+		kVmcsGuestIdtrBase = 0x6818,
+		kVmcsGuestDr7 = 0x681A,
+		kVmcsGuestRsp = 0x681C,
+		kVmcsGuestRip = 0x681E,
+		kVmcsGuestRflags = 0x6820,
+		kVmcsGuestPendingDebugExceptions = 0x6822,
+		kVmcsGuestSysenterEsp = 0x6824,
+		kVmcsGuestSysenterEip = 0x6826,
+
+		kVmcsHostCr0 = 0x6C00,
+		kVmcsHostCr3 = 0x6C02,
+		kVmcsHostCr4 = 0x6C04,
+		kVmcsHostFsBase = 0x6C06,
+		kVmcsHostGsBase = 0x6C08,
+		kVmcsHostTrBase = 0x6C0A,
+		kVmcsHostGdtrBase = 0x6C0C,
+		kVmcsHostIdtrBase = 0x6C0E,
+		kVmcsHostIa32SysenterEsp = 0x6C10,
+		kVmcsHostIa32SysenterEip = 0x6C12,
+		kVmcsHostRsp = 0x6C14,
+		kVmcsHostRip = 0x6C16,
+	};
+
+	enum {
+		kVmxExitException = 0,
+		kVmxExitExternalInterrupt = 1,
+		kVmxExitTripleFault = 2,
+		kVmxExitInitSignal = 3,
+		kVmxExitStartupIpi = 4,
+		kVmxExitIoSmi = 5,
+		kVmxExitOtherSmi = 6,
+		kVmxExitInterruptWindow = 7,
+		kVmxExitNmiWindow = 8,
+		kVmxExitTaskSwitch = 9,
+		kVmxExitCpuid = 10,
+		kVmxExitGetsec = 11,
+		kVmxExitHlt = 12,
+		kVmxExitInvd = 13,
+		kVmxExitInvlpg = 14,
+		kVmxExitRdpmc = 15,
+		kVmxExitRdtsc = 16,
+		kVmxExitRsm = 17,
+		kVmxExitVmcall = 18,
+		kVmxExitVmclear = 19,
+		kVmxExitVmlaunch = 20,
+		kVmxExitVmptrld = 21,
+		kVmxExitVmptrst = 22,
+		kVmxExitVmread = 23,
+		kVmxExitVmresume = 24,
+		kVmxExitVmwrite = 25,
+		kVmxExitVmxoff = 26,
+		kVmxExitVmxon = 27,
+		kVmxExitCrAccess = 28,
+		kVmxExitDrAccess = 29,
+		kVmxExitIoInstruction = 30,
+		kVmxExitMsrRead = 31,
+		kVmxExitMsrWrite = 32,
+		kVmxExitEntryFailureInvalidGuestState = 33,
+		kVmxExitEntryFailureMsrLoad = 34,
+		kVmxExitMwait = 36,
+		kVmxExitMonitorTrap = 37,
+		kVmxExitMonitor = 39,
+		kVmxExitPause = 40,
+		kVmxExitEntryFailureMachineCheck = 41,
+		kVmxExitTprBelowThreshold = 43,
+		kVmxExitApicAccess = 44,
+		kVmxExitVirtualizedEoi = 45,
+		kVmxExitGdtrIdtrAccess = 46,
+		kVmxExitLdtrTrAccess = 47,
+		kVmxExitEptViolation = 48,
+		kVmxExitEptMisconfig = 49,
+		kVmxExitInvept = 50,
+		kVmxExitRdtscp = 51,
+		kVmxExitPreemptionTimer = 52,
+		kVmxExitInvvpid = 53,
+		kVmxExitWbinvd = 54,
+		kVmxExitXsetbv = 55,
+		kVmxExitApicWrite = 56,
+		kVmxExitRdrand = 57,
+		kVmxExitInvpcid = 58,
+		kVmxExitVmfunc = 59,
+		kVmxExitEncls = 60,
+		kVmxExitRdseed = 61,
+		kVmxExitPageModificationLogFull = 62,
+		kVmxExitXsaves = 63,
+		kVmxExitXrstors = 64,
+		kVmxExitPconfig = 65,
+		kVmxExitSppRelated = 66,
+		kVmxExitUmwait = 67,
+		kVmxExitTpause = 68,
+		kVmxExitLoadiwkey = 69,
+		kVmxExitEnclv = 70,
+		kVmxExitEnqcmdPasidTranslationFailure = 72,
+		kVmxExitEnqcmdsPasidTranslationFailure = 73,
+		kVmxExitBusLock = 74,
+		kVmxExitInstructionTimeout = 75,
+		kVmxExitSeamcall = 76,
+		kVmxExitTdcall = 77,
+		kVmxExitRdmsrList = 78,
+		kVmxExitWrmsrList = 79,
+	};
+
+	inline void vmptrld(PhysicalAddr vmcs) {
+		bool success;
+		asm volatile("vmptrld %1" : "=@ccnc"(success) : "m"(vmcs) : "memory");
+		assert(success && "vmptrld failed");
 	}
 
-	inline int vmclear(PhysicalAddr vmcs) {
-		uint8_t ret;
-		asm volatile (
-			"vmclear %[pa];"
-			"setna %[ret];"
-			: [ret]"=rm"(ret)
-			: [pa]"m"(vmcs)
-			: "cc", "memory");
-		return ret;
+	inline void vmclear(PhysicalAddr vmcs) {
+		bool success;
+		asm volatile("vmclear %1" : "=@ccnz"(success) : "m"(vmcs) : "memory");
+		assert(success && "vmclear failed");
 	}
 
-	inline int vmwrite(uint64_t encoding, uint64_t value) {
-		uint8_t ret;
-		asm volatile (
-			"vmwrite %1, %2;"
-			"setna %[ret]"
-			: [ret]"=rm"(ret)
-			: "rm"(value), "r"(encoding)
-			: "cc", "memory");
-
-		return ret;
+	inline uint64_t vmread(uint64_t field) {
+		bool success;
+		uint64_t value;
+		asm volatile("vmread %2, %1" : "=@ccnz"(success), "=rm"(value) : "r"(field) : "memory");
+		assert(success && "vmread failed");
+		return value;
 	}
 
-	inline uint64_t vmread(uint64_t encoding) {
-		uint64_t tmp;
-		uint8_t ret;
-		asm volatile(
-			"vmread %[encoding], %[value];"
-			"setna %[ret];"
-			: [value]"=rm"(tmp), [ret]"=rm"(ret)
-			: [encoding]"r"(encoding)
-			: "cc", "memory");
-
-		return tmp;
+	inline void vmwrite(uint64_t field, uint64_t value) {
+		bool success;
+		asm volatile("vmwrite %1, %2" : "=@ccnz"(success) : "rm"(value), "r"(field) : "memory");
+		assert(success && "vmwrite failed");
 	}
 }
 
-extern "C" void vmxVmRun(thor::vmx::Vmcs* vm, void* state, bool launched);
-extern "C" uintptr_t vmxDoVmExit[]; // Actually a function that cannot be called in the conventional sense, just need the address
+extern "C" uint64_t vmxVmRun(thor::vmx::Vmcs* vm, thor::GuestState* state, bool resume);
+extern "C" uint8_t vmxDoVmExit[]; // Actually a function that cannot be called in the conventional sense, just need the address
 
 extern "C" void vmxUpdateHostRsp(thor::vmx::Vmcs* vm, uintptr_t rsp) {
-	if(vm->saved_host_rsp != rsp) {
-		vmwrite(thor::vmx::HOST_RSP, rsp);
-		vm->saved_host_rsp = rsp;
-	}
+	vm->updateHostRsp(rsp);
 }
 
 namespace thor::vmx {
-	bool vmxon() {
-		infoLogger() << "vmx: enabling vmx" << frg::endlog;
+	bool initialize() {
+		infoLogger() << "vmx: Entering VMX operation" << frg::endlog;
 
 		auto vmxonRegion = physicalAllocator->allocate(kPageSize);
 		assert(reinterpret_cast<PhysicalAddr>(vmxonRegion) != static_cast<PhysicalAddr>(-1) && "OOM");
 
 		PageAccessor vmxonAccessor{vmxonRegion};
 		memset(vmxonAccessor.get(), 0, kPageSize);
-		size_t control = common::x86::rdmsr(0x3a);
-		if((control & (0x1 | 0x4)) != (0x1 | 0x04)) {
-			//Enabled outside of SMX and lock bit.
-			common::x86::wrmsr(0x3a, control | 0x1 | 0x4);
+
+		auto control = common::x86::rdmsr(common::x86::kMsrFeatureControl);
+		auto expectedBits = common::x86::kFeatureControlLock | common::x86::kFeatureControlVmxonOutsideSmx;
+		if ((control & expectedBits) != expectedBits) {
+			// Set the lock bit and VMXON outside SMX.
+			common::x86::wrmsr(common::x86::kMsrFeatureControl, control | expectedBits);
 		}
 
 		uint64_t cr0;
-		asm volatile ("mov %%cr0, %0" : "=r" (cr0));
-		cr0 &= common::x86::rdmsr(0x487);
-		cr0 |= common::x86::rdmsr(0x486);
-		asm volatile ("mov %0, %%cr0" : : "r" (cr0));
+		asm volatile("mov %%cr0, %0" : "=r" (cr0));
+		cr0 &= common::x86::rdmsr(common::x86::kMsrVmxCr0Fixed1);
+		cr0 |= common::x86::rdmsr(common::x86::kMsrVmxCr0Fixed0);
+		asm volatile("mov %0, %%cr0" : : "r" (cr0));
 
 		uint64_t cr4;
-		asm volatile ("mov %%cr4, %0" : "=r" (cr4));
+		asm volatile("mov %%cr4, %0" : "=r" (cr4));
+		cr4 &= common::x86::rdmsr(common::x86::kMsrVmxCr4Fixed1);
+		cr4 |= common::x86::rdmsr(common::x86::kMsrVmxCr4Fixed0);
+		asm volatile("mov %0, %%cr4" : : "r" (cr4));
+
+		// Enable VMX
 		cr4 |= 1 << 13;
-		cr4 &= common::x86::rdmsr(0x489);
-		cr4 |= common::x86::rdmsr(0x488);
-		asm volatile ("mov %0, %%cr4" : : "r" (cr4));
+		asm volatile("mov %0, %%cr4" : : "r" (cr4));
 
-		//Set vmx revision
-		uint32_t vmxRevision = common::x86::rdmsr(0x480);
-		*(uint32_t*)vmxonAccessor.get() = static_cast<uint32_t>(vmxRevision);
-		uint16_t successful = 0;
-		asm volatile(
-			"vmxon %1;"
-			"jnc success;"
-			"movq $0, %%rdx;"
-			"success:"
-			"movq $1, %%rdx;"
-			:"=d"(successful)
-			:"m"(vmxonRegion)
-			:"memory", "cc"
-		);
+		// Set VMX revision
+		auto vmxRevision = common::x86::rdmsr(common::x86::kMsrVmxBasic);
+		*reinterpret_cast<uint32_t*>(vmxonAccessor.get()) = static_cast<uint32_t>(vmxRevision & 0x7FFF'FFFF);
 
-		if(successful) {
-			infoLogger() << "thor: CPU entered vmxon operation" << frg::endlog;
+		// Enter VMX operation
+		bool success;
+		asm volatile("vmxon %1" : "=@ccnc"(success) : "m"(vmxonRegion) : "memory");
+		if(success) {
+			infoLogger() << "vmx: CPU entered VMX operation" << frg::endlog;
 		} else {
-			urgentLogger() << "thor: vmxon failed; this will be a hard error in the future"
-					<< frg::endlog;
+			urgentLogger() << "vmx: VMXON failed, this will be a hard error in the future" << frg::endlog;
 		}
 
-		return successful;
+		return success;
 	}
 
-	Vmcs::Vmcs(smarter::shared_ptr<EptSpace> ept) : space(ept) {
+	Vmcs::Vmcs(smarter::shared_ptr<EptSpace> ept) : _space(std::move(ept)) {
 		infoLogger() << "vmx: Creating VMCS" << frg::endlog;
-		region = (void*)physicalAllocator->allocate(kPageSize);
-		PageAccessor regionAccessor{(PhysicalAddr)region};
-		memset(regionAccessor.get(), 0, kPageSize);
-		uint32_t vmxRevision = common::x86::rdmsr(0x480);
-		*(uint32_t*)regionAccessor.get() = static_cast<uint32_t>(vmxRevision);
-		if(vmptrld((PhysicalAddr)region)) {
-			infoLogger() << "vmx: VMCS load failed" << frg::endlog;
-		}
 
-		//Set up basic controls.
-		uint64_t allowedPinBased = common::x86::rdmsr(MSR_IA32_VMX_PINBASED_CTLS);
-		uint32_t pinbased = (uint32_t)allowedPinBased & (uint32_t)(allowedPinBased >> 32);
-		vmwrite(PIN_BASED_VM_EXEC_CONTROLS, pinbased | 1);
-		uint64_t allowedCpu = common::x86::rdmsr(MSR_IA32_VMX_PROCBASED_CTLS);
-		uint32_t cpu = (uint32_t)allowedCpu & (uint32_t)(allowedCpu >> 32);
-		vmwrite(PROC_BASED_VM_EXEC_CONTROLS,
-				cpu |
-				VMEXIT_ON_HLT |
-				VMEXIT_ON_PIO |
-				SECONDARY_CONTROLS_ON);
-		vmwrite(PROC_BASED_VM_EXEC_CONTROLS2,
-				EPT_ENABLE |
-				UNRESTRICTED_GUEST |
-				VMEXIT_ON_DESCRIPTOR);
-		vmwrite(EXCEPTION_BITMAP, 0);
+		_state = {};
+		_vmcs = physicalAllocator->allocate(kPageSize);
+		assert(_vmcs != static_cast<PhysicalAddr>(-1) && "OOM");
 
-		uint64_t vmExitCtrls = common::x86::rdmsr(0x483);
-		uint32_t vmExitCtrlsLo = (uint32_t)vmExitCtrls;
-		uint32_t vmExitCtrlsHi = (uint32_t)(vmExitCtrls >> 32);
-		uint32_t vm_exit_ctls = 0;
-		vm_exit_ctls |= VMEXIT_CONTROLS_LONG_MODE;
-		vm_exit_ctls |= VMEXIT_CONTROLS_LOAD_IA32_EFER; // Load IA32_EFER on vm-exit
-		vm_exit_ctls |= vmExitCtrlsLo;
-		vm_exit_ctls &= vmExitCtrlsHi;
-		vmwrite(VM_EXIT_CONTROLS, vm_exit_ctls);
+		PageAccessor vmcsAccessor{_vmcs};
+		memset(vmcsAccessor.get(), 0, kPageSize);
 
-		uint64_t vmEntryCtrls = common::x86::rdmsr(0x484);
-		uint32_t vmEntryCtrlsLo = (uint32_t)vmEntryCtrls;
-		uint32_t vmEntryCtrlsHi = (uint32_t)(vmEntryCtrls >> 32);
-		uint32_t vm_entry_ctls = 0;
-		vm_entry_ctls |= 1 << 15;
-		vm_entry_ctls |= vmEntryCtrlsLo;
-		vm_entry_ctls &= vmEntryCtrlsHi;
-		vmwrite(VM_ENTRY_CONTROLS, vm_entry_ctls);
+		uint32_t vmxRevision = common::x86::rdmsr(common::x86::kMsrVmxBasic);
+		*reinterpret_cast<uint32_t*>(vmcsAccessor.get()) = static_cast<uint32_t>(vmxRevision & 0x7FFF'FFFF);
 
+		vmptrld(_vmcs);
+		vmwrite(kVmcsLinkFull, static_cast<uint64_t>(-1));
+
+		auto adjustCtls = [](uint32_t msr, uint32_t bits) -> uint32_t {
+			auto value = bits;
+			auto constraint = common::x86::rdmsr(msr);
+
+			value &= static_cast<uint32_t>(constraint >> 32);
+			value |= static_cast<uint32_t>(constraint);
+
+			// Make sure all the bits we want are set
+			assert((value & bits) == bits);
+
+			return value;
+		};
+
+		// Enable external interrupts and NMIs to cause VM exits
+		auto pinBased = adjustCtls(common::x86::kMsrVmxPinBasedCtls,
+			common::x86::kVmxPinBasedExternalInterruptExiting |
+			common::x86::kVmxPinBasedNmiExiting);
+		vmwrite(kVmcsPinBasedCtls, pinBased);
+
+		// Enable VM exits on HLT and port IO instructions
+		auto procBased = adjustCtls(common::x86::kMsrVmxProcBasedCtls,
+			common::x86::kVmxProcBasedCtlHltExiting |
+			common::x86::kVmxProcBasedCtlCr8StoreExiting |
+			common::x86::kVmxProcBasedCtlUnconditionalIoExiting |
+			common::x86::kVmxProcBasedCtlActivateSecondaryCtls);
+		vmwrite(kVmcsPrimaryProcBasedCtls, procBased);
+
+		// Enable EPT and unrestricted guest mode
+		auto procBased2 = adjustCtls(common::x86::kMsrVmxProcBasedCtls2,
+			common::x86::kVmxProcBasedCtl2EnableEpt |
+			common::x86::kVmxProcBasedCtl2UnrestrictedGuest);
+		vmwrite(kVmcsSecondaryProcBasedCtls, procBased2);
+
+		// Set up enter and exit controls
+		auto exitCtls = adjustCtls(common::x86::kMsrVmxExitCtls,
+			kVmExitCtlsHostAddrSpaceSize | kVmExitCtlsLoadIa32Efer | kVmExitCtlsSaveIa32Efer);
+		vmwrite(kVmcsVmExitCtls, exitCtls);
+
+		auto entryCtls = adjustCtls(common::x86::kMsrVmxEntryCtls,
+			kVmEntryCtlsLoadIa32Efer);
+		vmwrite(kVmcsVmEntryCtls, entryCtls);
+
+		// Set up host state on VM exit
 		uint64_t cr0, cr4;
-		asm volatile ("mov %%cr0,%0" : "=r"(cr0));
-		asm volatile ("mov %%cr4,%0" : "=r"(cr4));
-
-		//Set up host state on vmexit.
-		uint32_t cr0Fixed = (uint32_t)common::x86::rdmsr(IA32_VMX_CR0_FIXED0_MSR);
-		vmwrite(HOST_CR0, cr0Fixed | cr0);
-		uint32_t cr4Fixed = (uint32_t)common::x86::rdmsr(IA32_VMX_CR4_FIXED0_MSR);
-		vmwrite(HOST_CR4, cr4Fixed | cr4);
+		asm volatile("mov %%cr0, %0" : "=r" (cr0));
+		asm volatile("mov %%cr4, %0" : "=r" (cr4));
+		vmwrite(kVmcsHostCr0, cr0);
+		vmwrite(kVmcsHostCr4, cr4);
 
 		common::x86::Gdtr gdtr;
-		asm volatile("sgdt %[gdt]": [gdt]"=m"(gdtr));
 		common::x86::Idtr idtr;
-		asm volatile("sidt %[idt]": [idt]"=m"(idtr));
+		asm volatile("sgdt %0" : "=m"(gdtr));
+		asm volatile("sidt %0" : "=m"(idtr));
+		vmwrite(kVmcsHostGdtrBase, reinterpret_cast<uint64_t>(gdtr.pointer));
+		vmwrite(kVmcsHostIdtrBase, reinterpret_cast<uint64_t>(idtr.pointer));
 
-		uint32_t* gdt = gdtr.pointer;
-		uint32_t entry1 = (gdt[kGdtIndexTask * 2] >> 16) & 0xFFFF;
-		uint32_t entry2 = (gdt[kGdtIndexTask * 2 + 1]) & 0xFF;
-		uint32_t entry3 = (gdt[kGdtIndexTask * 2 + 1] >> 24) & 0xFF;
-		uint32_t entry4 = (gdt[kGdtIndexTask * 2 + 2]);
-		uint64_t trAddr = ((uint64_t)entry4 << 32) |
-			(entry1 | ((entry2) << 16) | ((entry3) << 24));
+		uint32_t entry1 = (gdtr.pointer[kGdtIndexTask * 2] >> 16) & 0xFFFF;
+		uint32_t entry2 = (gdtr.pointer[kGdtIndexTask * 2 + 1]) & 0xFF;
+		uint32_t entry3 = (gdtr.pointer[kGdtIndexTask * 2 + 1] >> 24) & 0xFF;
+		uint32_t entry4 = (gdtr.pointer[kGdtIndexTask * 2 + 2]);
+		uint64_t trAddr = static_cast<uint64_t>(entry4) << 32 | entry1 | entry2 << 16 | entry3 << 24;
+		vmwrite(kVmcsHostTrBase, trAddr);
 
+		auto efer = common::x86::rdmsr(common::x86::kMsrEfer);
+		vmwrite(kVmcsHostIa32EferFull, efer);
+		vmwrite(kVmcsHostRip, reinterpret_cast<uint64_t>(vmxDoVmExit));
 
-		vmwrite(HOST_TR_BASE, trAddr);
-		vmwrite(HOST_GDTR_BASE, (size_t)gdtr.pointer);
-		vmwrite(HOST_IDTR_BASE, (size_t)idtr.pointer);
-		vmwrite(HOST_EFER_FULL, common::x86::rdmsr(0xc0000080));
-		vmwrite(HOST_RIP, (size_t)vmxDoVmExit);
+		auto cr0Fixed0 = common::x86::rdmsr(common::x86::kMsrVmxCr0Fixed0);
+		auto cr0Fixed1 = common::x86::rdmsr(common::x86::kMsrVmxCr0Fixed1);
+		vmwrite(kVmcsCr0Mask, cr0Fixed0 & cr0Fixed1 & ~((1 << 0) | (1 << 31)));
 
-		//Set up guest state on vm entry.
-		vmwrite(GUEST_ES_SELECTOR, 0x0);
-		vmwrite(GUEST_CS_SELECTOR, 0);
-		vmwrite(GUEST_DS_SELECTOR, 0x0);
-		vmwrite(GUEST_FS_SELECTOR, 0x0);
-		vmwrite(GUEST_GS_SELECTOR, 0x0);
-		vmwrite(GUEST_SS_SELECTOR, 0x0);
-		vmwrite(GUEST_TR_SELECTOR, 0x0);
-		vmwrite(GUEST_LDTR_SELECTOR, 0x0);
-		vmwrite(GUEST_CS_BASE, 0x0);
-		vmwrite(GUEST_DS_BASE, 0x0);
-		vmwrite(GUEST_ES_BASE, 0x0);
-		vmwrite(GUEST_FS_BASE, 0x0);
-		vmwrite(GUEST_GS_BASE, 0x0);
-		vmwrite(GUEST_SS_BASE, 0x0);
-		vmwrite(GUEST_LDTR_BASE, 0x0);
-		vmwrite(GUEST_IDTR_BASE, 0x0);
-		vmwrite(GUEST_GDTR_BASE, 0x0);
-		vmwrite(GUEST_TR_BASE, 0x0);
-		vmwrite(GUEST_CS_LIMIT, 0xffff);
-		vmwrite(GUEST_DS_LIMIT, 0xffff);
-		vmwrite(GUEST_ES_LIMIT, 0xffff);
-		vmwrite(GUEST_FS_LIMIT, 0xffff);
-		vmwrite(GUEST_GS_LIMIT, 0xffff);
-		vmwrite(GUEST_SS_LIMIT, 0xffff);
-		vmwrite(GUEST_LDTR_LIMIT, 0xffff);
-		vmwrite(GUEST_TR_LIMIT, 0xffff);
-		vmwrite(GUEST_GDTR_LIMIT, 0xffff);
-		vmwrite(GUEST_IDTR_LIMIT, 0xffff);
+		auto cr4Fixed0 = common::x86::rdmsr(common::x86::kMsrVmxCr4Fixed0);
+		auto cr4Fixed1 = common::x86::rdmsr(common::x86::kMsrVmxCr4Fixed1);
+		vmwrite(kVmcsCr4Mask, cr4Fixed0 & cr4Fixed1);
 
-		vmwrite(GUEST_CS_ACCESS_RIGHT, CODE_ACCESS_RIGHT);
-		vmwrite(GUEST_DS_ACCESS_RIGHT, DATA_ACCESS_RIGHT);
-		vmwrite(GUEST_ES_ACCESS_RIGHT, DATA_ACCESS_RIGHT);
-		vmwrite(GUEST_FS_ACCESS_RIGHT, DATA_ACCESS_RIGHT);
-		vmwrite(GUEST_GS_ACCESS_RIGHT, DATA_ACCESS_RIGHT);
-		vmwrite(GUEST_SS_ACCESS_RIGHT, DATA_ACCESS_RIGHT);
-		vmwrite(GUEST_LDTR_ACCESS_RIGHT, LDTR_ACCESS_RIGHT);
-		vmwrite(GUEST_TR_ACCESS_RIGHT, TR_ACCESS_RIGHT);
-		vmwrite(GUEST_INTERRUPTIBILITY_STATE, 0x0);
-		vmwrite(GUEST_ACTIVITY_STATE, 0x0);
-		vmwrite(GUEST_DR7, 0x0);
-		vmwrite(GUEST_RSP, 0x0);
-		vmwrite(GUEST_RIP, 0x1000);
-		vmwrite(GUEST_RFLAG, RFLAG_RESERVED);
-		vmwrite(VMCS_LINK_POINTER, -1ll);
-		vmwrite(VMCS_FIELD_GUEST_EFER_FULL, 0x0);
-
-		vmwrite(GUEST_INTR_STATUS, 0);
-		vmwrite(GUEST_PML_INDEX, 0);
-		uint64_t cr0FixedGuest = common::x86::rdmsr(IA32_VMX_CR0_FIXED0_MSR);
-		uint32_t cr0FixedLo = (uint32_t)cr0FixedGuest;
-		uint32_t cr0FixedHi = (uint32_t)(cr0FixedGuest >> 32);
-		cr0FixedLo &= ~(1 << 0); // disable PE
-		cr0FixedLo &= ~(1 << 31); // disable PG
-		vmwrite(GUEST_CR0, cr0FixedLo | ((uint64_t)cr0FixedHi) << 32);
-		vmwrite(GUEST_CR3, 0x0);
-		uint64_t cr4FixedGuest = common::x86::rdmsr(IA32_VMX_CR4_FIXED0_MSR);
-		uint32_t cr4FixedLo = (uint32_t)cr4FixedGuest;
-		uint32_t cr4FixedHi = (uint32_t)(cr4FixedGuest >> 32);
-		vmwrite(GUEST_CR4, cr4FixedLo | ((uint64_t)cr4FixedHi) << 32);
-
-		vmwrite(CTLS_EPTP, ept->rootTable() | 6 | (4 - 1) << 3 | (1 << 6));
-		state = {};
-
+		auto eptCaps = common::x86::rdmsr(common::x86::kMsrVmxEptVpidCap);
+		auto eptPointer = static_cast<uint64_t>(_space->rootTable());
+		eptPointer |= (4 - 1) << 3; // 4-level paging
+		if(eptCaps & common::x86::kEptCapWriteBackMemoryType)
+			eptPointer |= 6; // Write-back caching
+		if(eptCaps & common::x86::kEptCapAccessedAndDirtyFlags)
+			eptPointer |= 1 << 6; // Enable accessed and dirty flags
+		vmwrite(kVmcsEptPointerFull, eptPointer);
 
 		if(getGlobalCpuFeatures()->haveXsave){
-			hostFstate = (uint8_t*)kernelAlloc->allocate(getGlobalCpuFeatures()->xsaveRegionSize);
-			assert(reinterpret_cast<PhysicalAddr>(hostFstate) != static_cast<PhysicalAddr>(-1) && "OOM");
-			memset((void*)hostFstate, 0, getGlobalCpuFeatures()->xsaveRegionSize);
-
-			guestFstate = (uint8_t*)kernelAlloc->allocate(getGlobalCpuFeatures()->xsaveRegionSize);
-			assert(reinterpret_cast<PhysicalAddr>(guestFstate) != static_cast<PhysicalAddr>(-1) && "OOM");
-			memset((void*)guestFstate, 0, getGlobalCpuFeatures()->xsaveRegionSize);
+			auto xsaveRegionSize = getGlobalCpuFeatures()->xsaveRegionSize;
+			_hostFstate = reinterpret_cast<uint8_t*>(kernelAlloc->allocate(xsaveRegionSize));
+			_guestFstate = reinterpret_cast<uint8_t*>(kernelAlloc->allocate(xsaveRegionSize));
+			memset(_hostFstate, 0, xsaveRegionSize);
+			memset(_guestFstate, 0, xsaveRegionSize);
 		} else {
-			hostFstate = (uint8_t*)kernelAlloc->allocate(512);
-			assert(reinterpret_cast<PhysicalAddr>(hostFstate) != static_cast<PhysicalAddr>(-1) && "OOM");
-			memset((void*)hostFstate, 0, 512);
-
-			guestFstate = (uint8_t*)kernelAlloc->allocate(512);
-			assert(reinterpret_cast<PhysicalAddr>(guestFstate) != static_cast<PhysicalAddr>(-1) && "OOM");
-			memset((void*)guestFstate, 0, 512);
+			_hostFstate = reinterpret_cast<uint8_t*>(kernelAlloc->allocate(512));
+			_guestFstate = reinterpret_cast<uint8_t*>(kernelAlloc->allocate(512));
+			memset(_hostFstate, 0, 512);
+			memset(_guestFstate, 0, 512);
 		}
+
+		vmwrite(kVmcsGuestEsLimit, 0xFFFF);
+		vmwrite(kVmcsGuestCsLimit, 0xFFFF);
+		vmwrite(kVmcsGuestSsLimit, 0xFFFF);
+		vmwrite(kVmcsGuestDsLimit, 0xFFFF);
+		vmwrite(kVmcsGuestFsLimit, 0xFFFF);
+		vmwrite(kVmcsGuestGsLimit, 0xFFFF);
+		vmwrite(kVmcsGuestLdtrLimit, 0xFFFF);
+		vmwrite(kVmcsGuestTrLimit, 0xFFFF);
+		vmwrite(kVmcsGuestGdtrLimit, 0xFFFF);
+		vmwrite(kVmcsGuestIdtrLimit, 0xFFFF);
+
+		auto codeAccessRights = 3 | 1 << 4 | 1 << 7;
+		auto dataAccessRights = 3 | 1 << 4 | 1 << 7;
+		auto ldtrAccessRights = 2 | 1 << 7;
+		auto trAccessRights   = 3 | 1 << 7;
+
+		vmwrite(kVmcsGuestEsAccessRights, dataAccessRights);
+		vmwrite(kVmcsGuestCsAccessRights, codeAccessRights);
+		vmwrite(kVmcsGuestSsAccessRights, dataAccessRights);
+		vmwrite(kVmcsGuestDsAccessRights, dataAccessRights);
+		vmwrite(kVmcsGuestFsAccessRights, dataAccessRights);
+		vmwrite(kVmcsGuestGsAccessRights, dataAccessRights);
+		vmwrite(kVmcsGuestLdtrAccessRights, ldtrAccessRights);
+		vmwrite(kVmcsGuestTrAccessRights, trAccessRights);
+	}
+
+	void Vmcs::updateHostRsp(uintptr_t rsp) {
+		if(rsp != _savedHostRsp)
+			vmwrite(kVmcsHostRsp, rsp);
+		_savedHostRsp = rsp;
 	}
 
 	HelVmexitReason Vmcs::run() {
-		vmptrld((PhysicalAddr)region);
+		vmptrld(_vmcs);
 
-		uint16_t es;
-		uint16_t cs;
-		uint16_t ss;
-		uint16_t ds;
-		uint16_t fs;
-		uint16_t gs;
-		uint16_t tr;
+		// Save the host state
+		uint16_t es, cs, ss, ds, fs, gs, tr;
+		asm volatile(
+			"mov %%es, %0;"
+			"mov %%cs, %1;"
+			"mov %%ss, %2;"
+			"mov %%ds, %3;"
+			"mov %%fs, %4;"
+			"mov %%gs, %5;"
+			"str %6;"
+			: "=r" (es), "=r" (cs), "=r" (ss), "=r" (ds), "=r" (fs), "=r" (gs), "=r" (tr)
+		);
+		vmwrite(kVmcsHostEsSelector, es);
+		vmwrite(kVmcsHostCsSelector, cs);
+		vmwrite(kVmcsHostSsSelector, ss);
+		vmwrite(kVmcsHostDsSelector, ds);
+		vmwrite(kVmcsHostFsSelector, fs);
+		vmwrite(kVmcsHostGsSelector, gs);
+		vmwrite(kVmcsHostTrSelector, tr);
+
 		uint64_t cr3;
-		asm volatile ("mov %%cr3,%0" : "=r"(cr3));
-		asm volatile ("str %[tr]" : [tr]"=rm"(tr));
-		asm volatile ("mov %%es,%0" : "=r"(es));
-		asm volatile ("mov %%cs,%0" : "=r"(cs));
-		asm volatile ("mov %%ss,%0" : "=r"(ss));
-		asm volatile ("mov %%ds,%0" : "=r"(ds));
-		asm volatile ("mov %%fs,%0" : "=r"(fs));
-		asm volatile ("mov %%gs,%0" : "=r"(gs));
+		asm volatile("mov %%cr3, %0" : "=r" (cr3));
+		vmwrite(kVmcsHostCr3, cr3);
 
-		vmwrite(HOST_ES_SELECTOR, es);
-		vmwrite(HOST_CS_SELECTOR, cs);
-		vmwrite(HOST_SS_SELECTOR, ss);
-		vmwrite(HOST_DS_SELECTOR, ds);
-		vmwrite(HOST_FS_SELECTOR, fs);
-		vmwrite(HOST_GS_SELECTOR, gs);
-		vmwrite(HOST_TR_SELECTOR, tr);
-		vmwrite(HOST_FS_BASE, common::x86::rdmsr(MSR_FS_BASE));
-		vmwrite(HOST_GS_BASE, common::x86::rdmsr(MSR_GS_BASE));
-		vmwrite(HOST_CR3, cr3);
+		auto fsBase = common::x86::rdmsr(common::x86::kMsrIndexFsBase);
+		auto gsBase = common::x86::rdmsr(common::x86::kMsrIndexGsBase);
+		vmwrite(kVmcsHostFsBase, fsBase);
+		vmwrite(kVmcsHostGsBase, gsBase);
 
-		vmclear((PhysicalAddr)region);
+		// Clear the VMCS launch state
+		vmclear(_vmcs);
 
-		HelVmexitReason exitInfo{};
-
-		bool launched = false;
-		while(1) {
-			/*
-			 * NOTE: this will only work as long as long
-			 * as threads always stay on the same cpu,
-			 * once that's changed all of the vmcs structures
-			 * owned by a thread will have to be vmcleared
-			 * and set launched = false;
-			 */
+		bool resume = false;
+		while(true) {
 			asm volatile("cli");
-			vmptrld((PhysicalAddr)region);
+
+			vmptrld(_vmcs);
 			if(getGlobalCpuFeatures()->haveXsave){
-				common::x86::xsave((uint8_t*)hostFstate, ~0);
-				common::x86::xrstor((uint8_t*)guestFstate, ~0);
+				common::x86::xsave(_hostFstate, ~0);
+				common::x86::xrstor(_guestFstate, ~0);
 			} else {
-				asm volatile ("fxsaveq %0" : : "m" (*hostFstate));
-				asm volatile ("fxrstorq %0" : : "m" (*guestFstate));
+				asm volatile("fxsaveq %0" : : "m" (*_hostFstate));
+				asm volatile("fxrstorq %0" : : "m" (*_guestFstate));
 			}
 
-			vmxVmRun(this, &state, launched);
-			launched = true;
+			auto rflags = vmxVmRun(this, &_state, resume);
+			assert(!(rflags & (1 << 0)));
+			resume = true;
 
 			if(getGlobalCpuFeatures()->haveXsave){
-				common::x86::xsave((uint8_t*)guestFstate, ~0);
-				common::x86::xrstor((uint8_t*)hostFstate, ~0);
+				common::x86::xsave(_guestFstate, ~0);
+				common::x86::xrstor(_hostFstate, ~0);
 			} else {
-				asm volatile ("fxsaveq %0" : : "m" (*guestFstate));
-				asm volatile ("fxrstorq %0" : : "m" (*hostFstate));
+				asm volatile("fxsaveq %0" : : "m" (*_guestFstate));
+				asm volatile("fxrstorq %0" : : "m" (*_hostFstate));
 			}
 
-			//Vm exits don't restore the gdt limit
+			// VM exits don't restore the GDT limit
 			common::x86::Gdtr gdtr;
-			asm volatile("sgdt %[gdt]": [gdt]"=m"(gdtr));
-			gdtr.limit = HOST_GDT_LIMIT;
-			asm volatile("lgdt %[gdt]": [gdt]"=m"(gdtr));
+			asm volatile("sgdt %0": "=m"(gdtr));
+			gdtr.limit = 14 * 8;
+			asm volatile("lgdt %0": "=m"(gdtr));
 			asm volatile("sti");
 
-			auto error = vmread(VM_INSTRUCTION_ERROR);
-			if(error) {
-				infoLogger() << "vmx: vmx error" << error << frg::endlog;
-				exitInfo.exitReason = kHelVmexitError;
+			auto exitReason = vmread(kVmcsExitReason);
+			HelVmexitReason exitInfo = {};
+			switch(exitReason) {
+			case kVmxExitExternalInterrupt:
+				exitInfo.exitReason = kHelVmExitExternalInterrupt;
 				return exitInfo;
-			}
-
-			auto reason = vmread(VM_EXIT_REASON);
-			if(reason == VMEXIT_HLT) {
-				infoLogger() << "vmx: hlt" << frg::endlog;
-				exitInfo.exitReason = kHelVmexitHlt;
+			case kVmxExitHlt:
+				exitInfo.exitReason = kHelVmExitHlt;
 				return exitInfo;
-			} else if(reason == VMEXIT_IO_INSTRUCTION) {
-				infoLogger() << "vmx: io-instruction exit" << frg::endlog;
-				uint64_t exitFlags = vmread(EXIT_QUALIFICATION);
-				uint64_t instructionLength = vmread(VM_INSTRUCTION_LENGTH);
-
-				HelX86VirtualizationRegs regs;
-				loadRegs(&regs);
-				regs.rip += instructionLength;
-				storeRegs(&regs);
-
-				exitInfo.exitReason = kHelVmexitIo;
-				exitInfo.address = exitFlags >> 16;
-
-				if((exitFlags >> 3) & 1)
-					exitInfo.flags = kHelIoRead;
-				else
-					exitInfo.flags = kHelIoWrite;
-
-				switch(exitFlags & 0x7) {
+			case kVmxExitIoInstruction: {
+				auto guestRip = vmread(kVmcsGuestRip);
+				auto instructionLength = vmread(kVmcsVmExitInstructionLength);
+				auto exitQualification = vmread(kVmcsExitQualification);
+				vmwrite(kVmcsGuestRip, guestRip + instructionLength);
+				exitInfo.exitReason = kHelVmExitIo;
+				exitInfo.address = exitQualification >> 16;
+				exitInfo.flags = (exitQualification >> 3) & 1 ? kHelIoRead : kHelIoWrite;
+				switch(exitQualification & 0x7) {
 					case 0:
 						exitInfo.flags |= kHelIoWidth8;
 						break;
@@ -396,141 +563,161 @@ namespace thor::vmx {
 						exitInfo.flags |= kHelIoWidth64;
 						break;
 					default:
-						__builtin_unreachable();
+						assert(!"Invalid IO width");
 				}
-
 				return exitInfo;
-			} else if(reason == VMEXIT_EPT_VIOLATION) {
-				size_t address = vmread(EPT_VIOLATION_ADDRESS);
-				size_t exitFlags = vmread(EXIT_QUALIFICATION);
+			}
+			case kVmxExitEptViolation: {
 				uint32_t flags = 0;
-				if(exitFlags & 1)
+				auto violationAddress = vmread(kVmcsGuestPhysAddrFull);
+				auto exitQualification = vmread(kVmcsExitQualification);
+				if(exitQualification & (1 << 1))
 					flags |= AddressSpace::kFaultWrite;
-				if(exitFlags & (1 << 2))
+				if(exitQualification & (1 << 2))
 					flags |= AddressSpace::kFaultExecute;
-
-				auto faultOutcome = Thread::asyncBlockCurrent(space->handleFault(address, flags,
-						getCurrentThread()->mainWorkQueue()->take()));
-				if(!faultOutcome) {
-					exitInfo.exitReason = kHelVmexitTranslationFault;
-					exitInfo.address = address;
-					exitInfo.flags = exitFlags;
-					return exitInfo;
-				}
-			} else if(reason == VMEXIT_EXTERNAL_INTERRUPT) {
-				infoLogger() << "vmx: external-interrupt exit" << frg::endlog;
-			} else {
-				infoLogger() << "vmx: Unknown VMExit code: " << reason << frg::endlog;
-				exitInfo.exitReason = kHelVmexitUnknownPlatformSpecificExitCode;
-				exitInfo.code = reason;
+				auto thisThread = getCurrentThread();
+				auto wq = thisThread->pagingWorkQueue();
+				auto result = Thread::asyncBlockCurrent(
+					_space->handleFault(violationAddress, flags, wq->take()), wq);
+				if(result)
+					break;
+				if(exitQualification & (1 << 0))
+					infoLogger() << "vmx: EPT violation due to data read" << frg::endlog;
+				if(exitQualification & (1 << 1))
+					infoLogger() << "vmx: EPT violation due to data write" << frg::endlog;
+				if(exitQualification & (1 << 2))
+					infoLogger() << "vmx: EPT violation due to instruction fetch" << frg::endlog;
+				infoLogger() << "vmx: Violation address " << frg::hex_fmt{violationAddress} << frg::endlog;
+				exitInfo.exitReason = kHelVmExitTranslationFault;
+				exitInfo.address = violationAddress;
+				exitInfo.flags = flags;
+				return exitInfo;
+			}
+			default:
+				urgentLogger() << "vmx: Unhandled VM exit reason " << exitReason << frg::endlog;
+				exitInfo.exitReason = kHelVmExitError;
+				exitInfo.code = exitReason;
+				exitInfo.address = vmread(kVmcsGuestRip);
 				return exitInfo;
 			}
 		}
 	}
 
 	void Vmcs::storeRegs(const HelX86VirtualizationRegs *regs) {
-		memcpy(&state, regs, sizeof(GuestState));
+		vmptrld(_vmcs);
 
-		vmwrite(GUEST_RSP, regs->rsp);
-		vmwrite(GUEST_RIP, regs->rip);
+		memcpy(&_state, regs, sizeof(GuestState));
 
-		#define SET_SEGMENT(segment, segment_capital) \
-            vmwrite(GUEST_##segment_capital##_BASE, regs->segment.base); \
-            vmwrite(GUEST_##segment_capital##_LIMIT, regs->segment.limit); \
-            vmwrite(GUEST_##segment_capital##_SELECTOR, regs->segment.selector); \
-            { \
-                uint32_t attrib = regs->segment.type | (regs->segment.s << 4) | \
-                                  (regs->segment.dpl << 5) | (regs->segment.present << 7) | \
-                                  (regs->segment.avl << 12) | (regs->segment.l << 13) | \
-                                  (regs->segment.db << 14) | (regs->segment.g << 15); \
-                vmwrite(GUEST_##segment_capital##_ACCESS_RIGHT, attrib); \
-            }
+		vmwrite(kVmcsGuestRsp, regs->rsp);
+		vmwrite(kVmcsGuestRip, regs->rip);
+		vmwrite(kVmcsGuestRflags, regs->rflags);
 
-		SET_SEGMENT(cs, CS);
-		SET_SEGMENT(ds, DS);
-		SET_SEGMENT(ss, SS);
-		SET_SEGMENT(es, ES);
-		SET_SEGMENT(fs, FS);
-		SET_SEGMENT(gs, GS);
+		#define setSegment(segment, segment_field) \
+			vmwrite(segment_field##Selector, regs->segment.selector); \
+			vmwrite(segment_field##Base, regs->segment.base); \
+			vmwrite(segment_field##Limit, regs->segment.limit); \
+			{ \
+				uint32_t attrib = regs->segment.type | (regs->segment.s << 4) | \
+					(regs->segment.dpl << 5) | (regs->segment.present << 7) | \
+					(regs->segment.avl << 12) | (regs->segment.l << 13) | \
+					(regs->segment.db << 14) | (regs->segment.g << 15); \
+				vmwrite(segment_field##AccessRights, attrib); \
+			}
 
-		SET_SEGMENT(ldt, LDTR);
-		SET_SEGMENT(tr, TR);
+		setSegment(cs, kVmcsGuestCs);
+		setSegment(ds, kVmcsGuestDs);
+		setSegment(ss, kVmcsGuestSs);
+		setSegment(es, kVmcsGuestEs);
+		setSegment(fs, kVmcsGuestFs);
+		setSegment(gs, kVmcsGuestGs);
 
-		vmwrite(GUEST_GDTR_BASE, regs->gdt.base);
-		vmwrite(GUEST_GDTR_LIMIT, regs->gdt.base);
+		setSegment(tr, kVmcsGuestTr);
+		setSegment(ldt, kVmcsGuestLdtr);
 
-		vmwrite(GUEST_IDTR_BASE, regs->idt.base);
-		vmwrite(GUEST_IDTR_LIMIT, regs->idt.base);
+		vmwrite(kVmcsGuestGdtrBase, regs->gdt.base);
+		vmwrite(kVmcsGuestGdtrLimit, regs->gdt.limit);
 
-		uint64_t cr0Fixed = common::x86::rdmsr(IA32_VMX_CR0_FIXED0_MSR);
-		cr0Fixed &= ~(1 << 0); // disable PE
-		cr0Fixed &= ~(1 << 31); // disable PG
-		vmwrite(GUEST_CR0, cr0Fixed | regs->cr0);
+		vmwrite(kVmcsGuestIdtrBase, regs->idt.base);
+		vmwrite(kVmcsGuestIdtrLimit, regs->idt.limit);
 
-		uint64_t cr4Fixed = common::x86::rdmsr(IA32_VMX_CR4_FIXED0_MSR);
-		vmwrite(GUEST_CR4, cr4Fixed | regs->cr4);
+		auto cr0Fixed0 = common::x86::rdmsr(common::x86::kMsrVmxCr0Fixed0);
+		auto cr0Fixed1 = common::x86::rdmsr(common::x86::kMsrVmxCr0Fixed1);
+		vmwrite(kVmcsGuestCr0, regs->cr0 | (cr0Fixed0 & cr0Fixed1 & ~((1 << 0) | (1 << 31))));
 
-		vmwrite(GUEST_CR3, regs->cr3);
+		vmwrite(kVmcsGuestCr3, regs->cr3);
 
-		if(regs->efer & (1 << 10)) {
-			uint64_t vmEntryCtrls = common::x86::rdmsr(0x484);
-			vmEntryCtrls |= 1 << 9; // IA-32e mode guest
-			vmwrite(VM_ENTRY_CONTROLS, vmEntryCtrls);
-		} else {
-			uint64_t vmEntryCtrls = common::x86::rdmsr(0x484);
-			vmEntryCtrls &= ~(1 << 9); // IA-32e mode guest
-			vmwrite(VM_ENTRY_CONTROLS, vmEntryCtrls);
+		auto cr4Fixed0 = common::x86::rdmsr(common::x86::kMsrVmxCr4Fixed0);
+		auto cr4Fixed1 = common::x86::rdmsr(common::x86::kMsrVmxCr4Fixed1);
+		vmwrite(kVmcsGuestCr4, regs->cr4 | (cr4Fixed0 & cr4Fixed1));
+
+		auto efer = regs->efer;
+		if(regs->cr0 & (1 << 31) && regs->efer & (1 << 8)) {
+			// Set LMA if CR0.PG and EFER.LME are set
+			efer |= 1 << 10;
+			// Set TSS type to busy
+			auto trAccessRights = vmread(kVmcsGuestTrAccessRights);
+			vmwrite(kVmcsGuestTrAccessRights, (trAccessRights & ~0xF) | 0xB);
 		}
 
-		vmwrite(VMCS_FIELD_GUEST_EFER_FULL, regs->efer);
+		auto vmEntryCtls = vmread(kVmcsVmEntryCtls);
+		if(efer & (1 << 10) && !(vmEntryCtls & kVmEntryCtlsIa32eModeGuest))
+			vmwrite(kVmcsVmEntryCtls, vmEntryCtls | kVmEntryCtlsIa32eModeGuest);
+		else if(!(efer & (1 << 10)) && vmEntryCtls & kVmEntryCtlsIa32eModeGuest)
+			vmwrite(kVmcsVmEntryCtls, vmEntryCtls & ~kVmEntryCtlsIa32eModeGuest);
+
+		vmwrite(kVmcsGuestIa32EferFull, efer);
 	}
 
 	void Vmcs::loadRegs(HelX86VirtualizationRegs *regs) {
-		memcpy(regs, &state, sizeof(GuestState));
+		vmptrld(_vmcs);
 
-		regs->rsp = vmread(GUEST_RSP);
-		regs->rip = vmread(GUEST_RIP);
+		memcpy(regs, &_state, sizeof(GuestState));
 
-		#define GET_SEGMENT(segment, segment_capital) \
-            regs->segment.base = vmread(GUEST_##segment_capital##_BASE); \
-            regs->segment.limit = vmread(GUEST_##segment_capital##_LIMIT); \
-            regs->segment.selector = vmread(GUEST_##segment_capital##_SELECTOR); \
-            { \
-                auto seg = vmread(GUEST_##segment_capital##_ACCESS_RIGHT); \
-                regs->segment.type = seg & 0xF; \
-                regs->segment.s = (seg >> 4) & 1; \
-                regs->segment.dpl = (seg >> 5) & 3; \
-                regs->segment.present = (seg >> 7) & 1; \
-                regs->segment.avl = (seg >> 12) & 1; \
-                regs->segment.l = (seg >> 13) & 1; \
-                regs->segment.db = (seg >> 14) & 1; \
-                regs->segment.g = (seg >> 15) & 1; \
-            }
+		regs->rsp = vmread(kVmcsGuestRsp);
+		regs->rip = vmread(kVmcsGuestRip);
+		regs->rflags = vmread(kVmcsGuestRflags);
 
-		GET_SEGMENT(cs, CS);
-		GET_SEGMENT(ds, DS);
-		GET_SEGMENT(ss, SS);
-		GET_SEGMENT(es, ES);
-		GET_SEGMENT(fs, FS);
-		GET_SEGMENT(gs, GS);
+		#define getSegment(segment, segment_field) \
+			regs->segment.base = vmread(segment_field##Base); \
+			regs->segment.limit = vmread(segment_field##Limit); \
+			regs->segment.selector = vmread(segment_field##Selector); \
+			{ \
+				auto seg = vmread(segment_field##AccessRights); \
+				regs->segment.type = seg & 0xF; \
+				regs->segment.s = (seg >> 4) & 1; \
+				regs->segment.dpl = (seg >> 5) & 3; \
+				regs->segment.present = (seg >> 7) & 1; \
+				regs->segment.avl = (seg >> 12) & 1; \
+				regs->segment.l = (seg >> 13) & 1; \
+				regs->segment.db = (seg >> 14) & 1; \
+				regs->segment.g = (seg >> 15) & 1; \
+			}
 
-		GET_SEGMENT(ldt, LDTR);
-		GET_SEGMENT(tr, TR);
+		getSegment(cs, kVmcsGuestCs);
+		getSegment(ds, kVmcsGuestDs);
+		getSegment(ss, kVmcsGuestSs);
+		getSegment(es, kVmcsGuestEs);
+		getSegment(fs, kVmcsGuestFs);
+		getSegment(gs, kVmcsGuestGs);
 
-		regs->gdt.base = vmread(GUEST_GDTR_BASE);
-		regs->gdt.base = vmread(GUEST_GDTR_LIMIT);
+		getSegment(tr, kVmcsGuestTr);
+		getSegment(ldt, kVmcsGuestLdtr);
 
-		regs->idt.base = vmread(GUEST_IDTR_BASE);
-		regs->idt.base = vmread(GUEST_IDTR_LIMIT);
+		regs->gdt.base = vmread(kVmcsGuestGdtrBase);
+		regs->gdt.limit = vmread(kVmcsGuestGdtrLimit);
 
-		regs->cr0 = vmread(GUEST_CR0);
-		regs->cr3 = vmread(GUEST_CR3);
-		regs->cr4 = vmread(GUEST_CR4);
+		regs->idt.base = vmread(kVmcsGuestIdtrBase);
+		regs->idt.limit = vmread(kVmcsGuestIdtrLimit);
 
-		regs->efer = vmread(VMCS_FIELD_GUEST_EFER_FULL);
+		regs->cr0 = vmread(kVmcsGuestCr0);
+		regs->cr3 = vmread(kVmcsGuestCr3);
+		regs->cr4 = vmread(kVmcsGuestCr4);
+		regs->efer = vmread(kVmcsGuestIa32EferFull);
 	}
 
 	Vmcs::~Vmcs() {
-		physicalAllocator->free((size_t)region, kPageSize);
+		vmclear(_vmcs);
+
+		physicalAllocator->free(_vmcs, kPageSize);
 	}
 }

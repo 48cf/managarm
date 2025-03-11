@@ -267,78 +267,111 @@ private:
 			case managarm::fs::KvmVcpuRunRequest::message_id: {
 				HelVmexitReason reason;
 				auto result = helRunVirtualizedCpu(vcpuHandle_, &reason);
-				HEL_CHECK(result);
+				if(result != kHelErrNone) {
+					managarm::fs::KvmVcpuRunReply reply;
+					reply.set_error(managarm::fs::Errors::INTERNAL_ERROR);
+
+					auto [sendResp] = co_await helix_ng::exchangeMsgs(
+						conversation,
+						helix_ng::sendBragiHeadOnly(reply, frg::stl_allocator{})
+					);
+					HEL_CHECK(sendResp.error());
+					co_return;
+				}
 
 				HelX86VirtualizationRegs regs;
 				result = helLoadRegisters(vcpuHandle_, kHelRegsVirtualization, &regs);
-				HEL_CHECK(result);
+				if(result != kHelErrNone) {
+					managarm::fs::KvmVcpuRunReply reply;
+					reply.set_error(managarm::fs::Errors::INTERNAL_ERROR);
 
-				auto state = reinterpret_cast<KvmRunState *>(vcpuMapping_.get());
-				// state->run.fail_entry.cpu
-
-				switch(reason.exitReason) {
-					case kHelVmexitHlt:
-						state->run.exit_reason = KVM_EXIT_HLT;
-						break;
-					case kHelVmexitIo: {
-						state->run.exit_reason = KVM_EXIT_IO;
-						state->run.io.port = reason.address;
-
-						if(reason.flags & kHelIoFlagString) {
-							std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO with string flag\e[39m" << std::endl;
-							break;
-						}
-
-						if(reason.flags & kHelIoStringRep) {
-							std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO with rep flag\e[39m" << std::endl;
-							break;
-						}
-
-						if(reason.flags & kHelIoRead) {
-							state->run.io.direction = KVM_EXIT_IO_IN;
-							std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO with direction=IN\e[39m" << std::endl;
-						} else {
-							uint8_t read_size;
-							state->run.io.direction = KVM_EXIT_IO_OUT;
-
-							if(reason.flags & kHelIoWidth8) {
-								read_size = 1;
-								state->scratch[0] = regs.rax & 0xff;
-							} else if(reason.flags & kHelIoWidth16) {
-								read_size = 2;
-								state->scratch[0] = regs.rax & 0xff;
-								state->scratch[1] = (regs.rax >> 8) & 0xff;
-							} else if(reason.flags & kHelIoWidth32) {
-								read_size = 4;
-								state->scratch[0] = regs.rax & 0xff;
-								state->scratch[1] = (regs.rax >> 8) & 0xff;
-								state->scratch[2] = (regs.rax >> 16) & 0xff;
-								state->scratch[3] = (regs.rax >> 24) & 0xff;
-							} else {
-								std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO size\e[39m" << std::endl;
-								break;
-							}
-
-							state->run.io.count = 1;
-							state->run.io.size = read_size;
-							state->run.io.data_offset = offsetof(KvmRunState, scratch);
-						}
-
-						break;
-					}
-					case kHelVmexitTranslationFault:
-						state->run.exit_reason = KVM_EXIT_MEMORY_FAULT;
-						break;
-					case static_cast<uint32_t>(kHelVmexitError):
-						state->run.exit_reason = KVM_EXIT_INTERNAL_ERROR;
-						break;
-					case static_cast<uint32_t>(kHelVmexitUnknownPlatformSpecificExitCode):
-						state->run.exit_reason = KVM_EXIT_UNKNOWN;
-						break;
+					auto [sendResp] = co_await helix_ng::exchangeMsgs(
+						conversation,
+						helix_ng::sendBragiHeadOnly(reply, frg::stl_allocator{})
+					);
+					HEL_CHECK(sendResp.error());
+					co_return;
 				}
 
 				managarm::fs::KvmVcpuRunReply reply;
 				reply.set_error(managarm::fs::Errors::SUCCESS);
+
+				auto state = reinterpret_cast<KvmRunState *>(vcpuMapping_.get());
+				switch(reason.exitReason) {
+				case kHelVmExitHlt:
+					state->run.exit_reason = KVM_EXIT_HLT;
+					break;
+				case kHelVmExitIo: {
+					state->run.exit_reason = KVM_EXIT_IO;
+					state->run.io.port = reason.address;
+
+					if(reason.flags & kHelIoFlagString) {
+						std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO with string flag\e[39m" << std::endl;
+						break;
+					}
+
+					if(reason.flags & kHelIoStringRep) {
+						std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO with rep flag\e[39m" << std::endl;
+						break;
+					}
+
+					if(reason.flags & kHelIoRead) {
+						state->run.io.direction = KVM_EXIT_IO_IN;
+						state->run.io.count = 1;
+						state->run.io.data_offset = offsetof(KvmRunState, scratch);
+
+						if(reason.flags & kHelIoWidth8) {
+							state->run.io.size = 1;
+						} else if(reason.flags & kHelIoWidth16) {
+							state->run.io.size = 2;
+						} else if(reason.flags & kHelIoWidth32) {
+							state->run.io.size = 4;
+						} else {
+							std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO size\e[39m" << std::endl;
+							break;
+						}
+					} else {
+						uint8_t read_size;
+						state->run.io.direction = KVM_EXIT_IO_OUT;
+
+						if(reason.flags & kHelIoWidth8) {
+							read_size = 1;
+							state->scratch[0] = regs.rax & 0xff;
+						} else if(reason.flags & kHelIoWidth16) {
+							read_size = 2;
+							state->scratch[0] = regs.rax & 0xff;
+							state->scratch[1] = (regs.rax >> 8) & 0xff;
+						} else if(reason.flags & kHelIoWidth32) {
+							read_size = 4;
+							state->scratch[0] = regs.rax & 0xff;
+							state->scratch[1] = (regs.rax >> 8) & 0xff;
+							state->scratch[2] = (regs.rax >> 16) & 0xff;
+							state->scratch[3] = (regs.rax >> 24) & 0xff;
+						} else {
+							std::cout << "\e[31mposix: Unhandled KVM_EXIT_IO size\e[39m" << std::endl;
+							break;
+						}
+
+						state->run.io.count = 1;
+						state->run.io.size = read_size;
+						state->run.io.data_offset = offsetof(KvmRunState, scratch);
+					}
+
+					break;
+				}
+				case kHelVmExitTranslationFault:
+					state->run.exit_reason = KVM_EXIT_MEMORY_FAULT;
+					break;
+				case kHelVmExitExternalInterrupt:
+					reply.set_error(managarm::fs::Errors::WOULD_BLOCK);
+					break;
+				case kHelVmExitError:
+					state->run.exit_reason = KVM_EXIT_INTERNAL_ERROR;
+					break;
+				case kHelVmExitUnknownPlatformSpecificExitCode:
+					state->run.exit_reason = KVM_EXIT_UNKNOWN;
+					break;
+				}
 
 				auto [sendResp] = co_await helix_ng::exchangeMsgs(
 					conversation,
@@ -447,43 +480,50 @@ private:
 				auto process = findProcessWithCredentials(extract_creds.credentials());
 				assert(process);
 
-				std::cout << std::format("guest_phys_addr={:#x}, user_addr={:#x}, memory_size={:#x}, flags={:#x}",
-					req->guest_phys_addr(), req->user_addr(), req->memory_size(), req->flags()) << std::endl;
-
-				helix::BorrowedDescriptor memory_handle;
+				helix::BorrowedDescriptor memoryHandle;
+				size_t offsetIntoMapping = 0;
 				for(auto area : *process->vmContext()) {
-					std::cout << std::format("base={:#x}, length={:#x}", area.baseAddress(), area.size()) << std::endl;
-					if(area.baseAddress() != req->user_addr() && area.size() != req->memory_size())
+					if(req->user_addr() < area.baseAddress() || req->user_addr() + req->memory_size() > area.baseAddress() + area.size())
 						continue;
 
+					offsetIntoMapping = req->user_addr() - area.baseAddress();
 					if(area.isPrivate()) {
-						memory_handle = area.copyView();
+						memoryHandle = area.copyView();
 					} else {
-						memory_handle = area.fileView();
+						memoryHandle = area.fileView();
 					}
+
+					std::cout << "\e[31mposix: Found memory region\e[39m" << std::endl;
+					std::cout << "\e[31mposix: areaBase=" << area.baseAddress() << "\e[39m" << std::endl;
+					std::cout << "\e[31mposix: areaSize=" << area.size() << "\e[39m" << std::endl;
+					std::cout << "\e[31mposix: offset=" << offsetIntoMapping << "\e[39m" << std::endl;
+					std::cout << "\e[31mposix: size=" << req->memory_size() << "\e[39m" << std::endl;
 
 					break;
 				}
 
 				managarm::fs::KvmSetMemoryRegionReply resp;
-				if(memory_handle.getHandle() == kHelNullHandle) {
-					resp.set_error(managarm::fs::Errors::ILLEGAL_ARGUMENT);
-					std::cout << "\e[31mposix: Could not find memory region\e[39m" << std::endl;
-				} else {
-					uint32_t map_flags = kHelMapFixed | kHelMapProtRead | kHelMapProtExecute;
-					if(!(req->flags() & KVM_MEM_READONLY))
-						map_flags |= kHelMapProtWrite;
+				if(req->memory_size() != 0) {
+					if(memoryHandle.getHandle() == kHelNullHandle) {
+						resp.set_error(managarm::fs::Errors::ILLEGAL_ARGUMENT);
+						std::cout << "\e[31mposix: Could not find memory region\e[39m" << std::endl;
+					} else if(memoryHandle.getHandle() != kHelNullHandle) {
+						uint32_t flags = kHelMapFixed | kHelMapProtRead | kHelMapProtExecute;
+						if(!(req->flags() & KVM_MEM_READONLY))
+							flags |= kHelMapProtWrite;
 
-					void *fake_ptr;
-					auto result = helMapMemory(memory_handle.getHandle(), vmSpaceHandle_,
-						reinterpret_cast<void *>(req->guest_phys_addr()),
-						0, req->memory_size(), map_flags, &fake_ptr);
+						void *fakePtr;
+						auto result = helMapMemory(memoryHandle.getHandle(), vmSpaceHandle_,
+							reinterpret_cast<void *>(req->guest_phys_addr()),
+							offsetIntoMapping, req->memory_size(), flags, &fakePtr);
 
-					if(result != kHelErrNone) {
-						resp.set_error(managarm::fs::Errors::INTERNAL_ERROR);
-						std::cout << "\e[31mposix: Failed to map memory region\e[39m" << std::endl;
-					} else {
-						resp.set_error(managarm::fs::Errors::SUCCESS);
+						if(result != kHelErrNone) {
+							resp.set_error(managarm::fs::Errors::INTERNAL_ERROR);
+							std::cout << "\e[31mposix: Failed to map memory region\e[39m" << std::endl;
+							std::cout << "\e[31mposix: error=" << result << "\e[39m" << std::endl;
+						} else {
+							resp.set_error(managarm::fs::Errors::SUCCESS);
+						}
 					}
 				}
 

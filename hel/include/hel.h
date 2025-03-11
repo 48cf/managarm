@@ -568,11 +568,12 @@ struct HelThreadStats {
 };
 
 enum {
-  kHelVmexitHlt = 0,
-  kHelVmexitIo = 1,
-  kHelVmexitTranslationFault = 2,
-  kHelVmexitError = -1,
-  kHelVmexitUnknownPlatformSpecificExitCode = -2,
+	kHelVmExitHlt,
+	kHelVmExitIo,
+	kHelVmExitTranslationFault,
+	kHelVmExitExternalInterrupt,
+	kHelVmExitError,
+	kHelVmExitUnknownPlatformSpecificExitCode,
 };
 
 enum {

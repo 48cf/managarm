@@ -22,12 +22,12 @@ namespace thor {
 		uint64_t r13;
 		uint64_t r14;
 		uint64_t r15;
-	} __attribute__((packed));
+	};
 
 	struct VirtualizedCpu {
-			virtual HelVmexitReason run() = 0;
-			virtual void storeRegs(const HelX86VirtualizationRegs *regs) = 0;
-			virtual void loadRegs(HelX86VirtualizationRegs *res) = 0;
+		virtual HelVmexitReason run() = 0;
+		virtual void storeRegs(const HelX86VirtualizationRegs *regs) = 0;
+		virtual void loadRegs(HelX86VirtualizationRegs *res) = 0;
 
 	protected:
 		~VirtualizedCpu() = default;

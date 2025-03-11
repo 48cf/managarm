@@ -58,13 +58,13 @@ int main() {
 	HEL_CHECK(helRunVirtualizedCpu(vcpu, &reason));
 
 	int32_t exitReason = static_cast<int32_t>(reason.exitReason);
-	if(exitReason == kHelVmexitHlt)
+	if(exitReason == kHelVmExitHlt)
 		std::cout << "HLT Instruction" << std::endl;
-	else if(exitReason == kHelVmexitError)
+	else if(exitReason == kHelVmExitError)
 		std::cout << "VMExit error" << std::endl;
-	else if(exitReason == kHelVmexitUnknownPlatformSpecificExitCode)
+	else if(exitReason == kHelVmExitUnknownPlatformSpecificExitCode)
 		std::cout << "Unknown platform specific exit code: 0x" << std::hex << reason.code << std::dec << std::endl;
-	else if(exitReason == kHelVmexitTranslationFault)
+	else if(exitReason == kHelVmExitTranslationFault)
 		std::cout << "Translation fault: 0x" << std::hex << reason.address << std::dec << std::endl;
 	else
 		std::cout << "Unknown reason: " << exitReason << std::endl;

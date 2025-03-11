@@ -1,14 +1,14 @@
-.set HOST_RSP, 0x00006c14
-.set HOST_RIP, 0x00006c16
-
-
 .section .text
 
-.extern vmxUpdateHostRsp
 .global vmxVmRun
 .global vmxDoVmExit
+.extern vmxUpdateHostRsp
 
-vmxVmRun: # rdi: thor::vmx::Vmcs* vm, rsi: Guest GPR State, rdx: launched
+# rdi: thor::vmx::Vmcs*
+# rsi: guest GPR State
+# rdx: resume or launch
+vmxVmRun:
+	# Save callee-saved registers
 	pushq %rbx
 	pushq %rbp
 	pushq %r12
@@ -17,60 +17,66 @@ vmxVmRun: # rdi: thor::vmx::Vmcs* vm, rsi: Guest GPR State, rdx: launched
 	pushq %r15
 
 	movq %rdx, %rbx # RBX is saved by functions
+	pushq %rsi
 
-	pushq %rsi;
+	movq %rsp, %rsi
+	call vmxUpdateHostRsp
 
-	mov %rsp, %rsi
-	call vmxUpdateHostRsp # Cannot push from this point
+	# Cannot modify stack pointer from this point
+	# Restore GPR state pointer from stack
+	movq (%rsp), %rsi
 
-	cmpq $1, %rbx # Cannot modify flags from this piont
+	# Cannot modify flags from this point
+	cmpq $1, %rbx
 
-	mov (%rsp), %rdi
+	movq (%rsi), %rax
+	movq 8(%rsi), %rbx
+	movq 16(%rsi), %rcx
+	movq 24(%rsi), %rdx
+	movq 40(%rsi), %rdi
+	movq 48(%rsi), %rbp
+	movq 56(%rsi), %r8
+	movq 64(%rsi), %r9
+	movq 72(%rsi), %r10
+	movq 80(%rsi), %r11
+	movq 88(%rsi), %r12
+	movq 96(%rsi), %r13
+	movq 104(%rsi), %r14
+	movq 112(%rsi), %r15
+	movq 32(%rsi), %rsi
 
-	movq 8(%rdi), %rbx;
-	movq 16(%rdi), %rcx;
-	movq 24(%rdi), %rdx;
-	movq 32(%rdi), %rsi;
-	movq 48(%rdi), %rbp;
-	movq 56(%rdi), %r8;
-	movq 64(%rdi), %r9;
-	movq 72(%rdi), %r10;
-	movq 80(%rdi), %r11;
-	movq 88(%rdi), %r12;
-	movq 96(%rdi), %r13;
-	movq 104(%rdi), %r14;
-	movq 112(%rdi), %r15;
-	movq (%rdi), %rax;
-	movq 40(%rdi), %rdi;
-	
-	je 1f
-
+	je .Ldo_resume
 	vmlaunch
-	jmp vmxDoVmExit # When vmlaunch errors it doesn't go to HOST_RIP (vmxDoVmExit), so we have to nudge it
 
-1:
+	# When vmlaunch errors it doesn't go to kVmcsHostRip (vmxDoVmExit)
+	# so we have to jump there manually
+	jmp vmxDoVmExit
+
+.Ldo_resume:
 	vmresume
 
 vmxDoVmExit:
-	pushq %rdi;
-	movq 8(%rsp), %rdi;
-	movq %rax, (%rdi);
-	movq %rbx, 8(%rdi);
-	movq %rcx, 16(%rdi);
-	movq %rdx, 24(%rdi);
-	movq %rsi, 32(%rdi);
-	movq %rbp, 48(%rdi);
-	movq %r8,  56(%rdi);
-	movq %r9,  64(%rdi);
-	movq %r10, 72(%rdi);
-	movq %r11, 80(%rdi);
-	movq %r12, 88(%rdi);
-	movq %r13, 96(%rdi);
-	movq %r14, 104(%rdi);
-	movq %r15, 112(%rdi);
-	popq %r8;
-	popq %r9;
-	movq %r8, 40(%r9);
+	pushq %rsi
+	movq 8(%rsp), %rsi
+
+	movq %rax, (%rsi)
+	movq %rbx, 8(%rsi)
+	movq %rcx, 16(%rsi)
+	movq %rdx, 24(%rsi)
+	movq %rdi, 40(%rsi)
+	movq %rbp, 48(%rsi)
+	movq %r8, 56(%rsi)
+	movq %r9, 64(%rsi)
+	movq %r10, 72(%rsi)
+	movq %r11, 80(%rsi)
+	movq %r12, 88(%rsi)
+	movq %r13, 96(%rsi)
+	movq %r14, 104(%rsi)
+	movq %r15, 112(%rsi)
+
+	popq %rsi # Guest RSI
+	popq %r15 # Host RSI (guest GPR state)
+	movq %rsi, 32(%r15)
 
 	popq %r15
 	popq %r14
@@ -79,6 +85,8 @@ vmxDoVmExit:
 	popq %rbp
 	popq %rbx
 
+	pushfq
+	popq %rax
 	retq
 
 	.section .note.GNU-stack,"",%progbits

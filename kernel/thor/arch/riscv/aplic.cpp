@@ -1,10 +1,12 @@
 #include <frg/dyn_array.hpp>
 #include <thor-internal/arch-generic/paging.hpp>
+#include <thor-internal/arch/aplic.hpp>
 #include <thor-internal/arch/trap.hpp>
 #include <thor-internal/debug.hpp>
 #include <thor-internal/dtb/dtb.hpp>
 #include <thor-internal/dtb/irq.hpp>
 #include <thor-internal/main.hpp>
+#include <thor-internal/util.hpp>
 
 namespace thor {
 
@@ -27,25 +29,16 @@ uint64_t readIndirect(uint64_t sel) {
 	riscv::writeCsr<riscv::Csr::siselect>(sel);
 	return riscv::readCsr<riscv::Csr::sireg>();
 }
+
 void writeIndirect(uint64_t sel, uint64_t v) {
 	riscv::writeCsr<riscv::Csr::siselect>(sel);
 	riscv::writeCsr<riscv::Csr::sireg>(v);
 }
 
-const frg::array<frg::string_view, 1> imsciCompatible = {"riscv,imsics"};
+const frg::array<frg::string_view, 1> imsicCompatible = {"riscv,imsics"};
 
-struct ImsicContext;
-
-struct Imsic {
-	// TODO: Store a dyn_array of all contexts instead of just the BSP's context.
-	ImsicContext *bspContext{nullptr};
-};
-
-// Per-CPU IMSIC context.
-struct ImsicContext {
-	uint32_t hartIndex{~UINT32_C(0)};
-	frg::dyn_array<IrqPin *, KernelAlloc> irqs{*kernelAlloc};
-};
+constexpr uintptr_t imsicPageShift = 12;
+constexpr uintptr_t imsicPageSize = 1 << imsicPageShift;
 
 // Only written before APs are booted (no locks needed).
 frg::manual_box<frg::hash_map<uint32_t, Imsic *, frg::hash<uint32_t>, KernelAlloc>> phandleToImsic;
@@ -53,15 +46,15 @@ frg::manual_box<frg::hash_map<uint32_t, Imsic *, frg::hash<uint32_t>, KernelAllo
 void enumerateImsic(DeviceTreeNode *imsicNode) {
 	infoLogger() << "thor: Found IMSIC " << imsicNode->path() << frg::endlog;
 
-	size_t bspIdx{~size_t{0}};
-	size_t i = 0;
+	uint32_t bspIdx{~uint32_t{0}};
+	uint32_t hartCount = 0;
 	bool success = dt::walkInterruptsExtended(
 	    [&](DeviceTreeNode *intcNode, dtb::Cells intcIrq) {
 		    if (!intcNode->isCompatible(intcCompatible))
 			    panicLogger() << "Expected interrupt parent of IMSIC to be cpu-intc device"
 			                  << frg::endlog;
 
-		    // Find the CPU corresponding to the IMSIC hard index based on the cpu-intc node.
+		    // Find the CPU corresponding to the IMSIC hart index based on the cpu-intc node.
 		    auto cpuNode = intcNode->parent();
 		    if (!cpuNode || !cpuNode->isCompatible(cpuCompatible))
 			    panicLogger() << "Expected parent of cpu-intc device to be CPU" << frg::endlog;
@@ -71,24 +64,28 @@ void enumerateImsic(DeviceTreeNode *imsicNode) {
 		    uint32_t intcIdx;
 		    if (!intcIrq.read(intcIdx))
 			    panicLogger() << "Failed to read cpu-intc interrupt index" << frg::endlog;
-		    infoLogger() << "    Hart index " << i << " connected to hart ID " << hartId
+		    infoLogger() << "    Hart index " << hartCount << " connected to hart ID " << hartId
 		                 << ", interrupt " << intcIdx << frg::endlog;
 
 		    if (hartId == getCpuData()->hartId && intcIdx == riscv::interrupts::sei)
-			    bspIdx = i;
-		    ++i;
+			    bspIdx = hartCount;
+		    ++hartCount;
 	    },
 	    imsicNode
 	);
 	if (!success)
 		panicLogger() << "Failed to walk interrupts of " << imsicNode->path() << frg::endlog;
 
-	if (bspIdx == ~size_t{0}) {
+	if (bspIdx == ~uint32_t{0}) {
 		infoLogger() << "    Failed to determine IMSIC hart index of BSP" << frg::endlog;
 		return;
 	}
-	infoLogger() << "    Hard index " << bspIdx << " corresponds to BSP S-mode external interrupt"
+	infoLogger() << "    Hart index " << bspIdx << " corresponds to BSP S-mode external interrupt"
 	             << frg::endlog;
+
+	const auto &reg = imsicNode->reg();
+	if (reg.size() != 1)
+		panicLogger() << "thor: Expect exactly one 'reg' entry for IMSICs" << frg::endlog;
 
 	auto numIdsProp = imsicNode->dtNode().findProperty("riscv,num-ids");
 	if (!numIdsProp)
@@ -96,6 +93,25 @@ void enumerateImsic(DeviceTreeNode *imsicNode) {
 	uint32_t numIds;
 	if (!numIdsProp->access().readCells(numIds, 1))
 		panicLogger() << "thor: Failed to read riscv,num-ids from IMSIC" << frg::endlog;
+
+	uint32_t hartIndexBits;
+	uint32_t groupIndexBits;
+
+	auto hartIndexBitsProp = imsicNode->dtNode().findProperty("riscv,hart-index-bits");
+	if (hartIndexBitsProp) {
+		if (!hartIndexBitsProp->access().readCells(hartIndexBits, 1))
+			panicLogger() << "thor: Failed to read riscv,hart-index-bits from IMSIC" << frg::endlog;
+	} else {
+		hartIndexBits = ceil_log2(hartCount + 1);
+	}
+
+	auto groupIndexBitsProp = imsicNode->dtNode().findProperty("riscv,group-index-bits");
+	if (hartIndexBitsProp) {
+		if (!groupIndexBitsProp->access().readCells(groupIndexBits, 1))
+			panicLogger() << "thor: Failed to read riscv,group-index-bits from IMSIC" << frg::endlog;
+	} else {
+		groupIndexBits = 0;
+	}
 
 	// Unmask all IRQs at the IMSIC level (then can be masked at the APLIC level).
 	writeIndirect(indirect::ethreshold, 0);
@@ -108,11 +124,8 @@ void enumerateImsic(DeviceTreeNode *imsicNode) {
 	if (readIndirect(indirect::edelivery) != 1)
 		panicLogger() << "thor: Failed to enable IMSIC interrupt delivery" << frg::endlog;
 
-	auto *imsic = frg::construct<Imsic>(*kernelAlloc);
-
-	auto *bspContext = frg::construct<ImsicContext>(*kernelAlloc);
-	bspContext->hartIndex = bspIdx;
-	bspContext->irqs = {numIds, *kernelAlloc};
+	auto *imsic = frg::construct<Imsic>(*kernelAlloc, reg.front().addr, hartIndexBits, groupIndexBits);
+	auto *bspContext = frg::construct<ImsicContext>(*kernelAlloc, numIds, bspIdx);
 	imsic->bspContext = bspContext;
 
 	phandleToImsic->insert(imsicNode->phandle(), imsic);
@@ -219,13 +232,14 @@ struct Aplic : dt::IrqController {
 
 			if (aplic_->imsic_) {
 				auto *ctx = aplic_->imsic_->bspContext;
-				// TODO: Fix this limitation by properly allocating IMSIC interrupts.
-				if (idx_ >= ctx->irqs.size())
-					panicLogger(
-					) << "thor: Cannot identity route APLIC interrupt to IMSIC interrupt "
-					  << idx_ << frg::endlog;
-				ctx->irqs[idx_] = this;
-				aplic_->space_.store(aplicTargetRegister(idx_), (ctx->hartIndex << 18) | idx_);
+				auto guard = frg::guard(&ctx->irqsLock);
+
+				size_t irqIndex = ctx->findFreeIndex();
+				if (irqIndex == 0)
+					panicLogger() << "thor: Cannot allocate an IMSIC interrupt vector" << frg::endlog;
+
+				ctx->irqs[irqIndex] = this;
+				aplic_->space_.store(aplicTargetRegister(idx_), (ctx->hartIndex << 18) | irqIndex);
 			} else {
 				// Program the source to target the BSP, set priority to 1.
 				aplic_->space_.store(aplicTargetRegister(idx_), (aplic_->bspIdx_ << 18) | 1);
@@ -476,7 +490,7 @@ initgraph::Task initPlic{
 	    phandleToImsic.initialize(frg::hash<uint32_t>{}, *kernelAlloc);
 
 	    getDeviceTreeRoot()->forEach([&](DeviceTreeNode *node) -> bool {
-		    if (node->isCompatible(imsciCompatible))
+		    if (node->isCompatible(imsicCompatible))
 			    enumerateImsic(node);
 		    return false;
 	    });
@@ -489,6 +503,64 @@ initgraph::Task initPlic{
 };
 
 } // namespace
+
+struct ImsicMsiPin final : MsiPin {
+	ImsicMsiPin(frg::string<KernelAlloc> name, Imsic *imsic, uint32_t vector)
+	: MsiPin{std::move(name)}, imsic_{imsic}, vector_{vector} { }
+
+	IrqStrategy program(TriggerMode mode, Polarity) override {
+		assert(mode == TriggerMode::edge);
+		return irq_strategy::endOfInterrupt;
+	}
+
+	void mask() override {
+		// TODO: This may be worth implementing (but it is not needed for correctness).
+	}
+
+	void unmask() override {
+		// TODO: This may be worth implementing (but it is not needed for correctness).
+	}
+
+	void endOfInterrupt() override {
+		// The IMSIC does not require EOIs.
+	}
+
+	uint64_t getMessageAddress() override {
+		// TODO: Support guest indices or whatever
+		return imsic_->base + imsic_->bspContext->hartIndex * imsicPageSize;
+	}
+
+	uint32_t getMessageData() override {
+		return vector_;
+	}
+
+private:
+	Imsic *imsic_;
+	uint32_t vector_;
+};
+
+Imsic *getImsicFromPhandle(uint32_t imsicPhandle) {
+	auto imsicIt = phandleToImsic->find(imsicPhandle);
+	if (imsicIt == phandleToImsic->end())
+		return nullptr;
+
+	return imsicIt->get<1>();
+}
+
+MsiPin *allocateImsicMsi(frg::string<KernelAlloc> name, Imsic *imsic) {
+	auto *ctx = imsic->bspContext;
+	auto guard = frg::guard(&ctx->irqsLock);
+
+	size_t msiIndex = ctx->findFreeIndex();
+	if (msiIndex == 0)
+		panicLogger() << "thor: Cannot allocate an IMSIC interrupt vector" << frg::endlog;
+
+	auto pin = frg::construct<ImsicMsiPin>(*kernelAlloc, std::move(name), imsic, msiIndex);
+	pin->configure(IrqConfiguration{TriggerMode::edge, Polarity::high});
+
+	ctx->irqs[msiIndex] = pin;
+	return pin;
+}
 
 IrqPin *claimImsicIrq() {
 	auto idx = riscv::readWriteCsr<riscv::Csr::stopei>(0) >> 16;

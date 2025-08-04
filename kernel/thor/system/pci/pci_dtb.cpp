@@ -10,7 +10,9 @@
 #include <thor-internal/pci/pcie_ecam.hpp>
 #include <thor-internal/pci/pcie_brcmstb.hpp>
 
-#ifndef __riscv
+#if defined(__riscv) && __riscv_xlen == 64
+#include <thor-internal/arch/aplic.hpp>
+#elif defined(__aarch64__)
 #include <thor-internal/arch/gic.hpp>
 #endif
 
@@ -147,7 +149,44 @@ void initPciNode(DeviceTreeNode *node) {
 		return;
 	}
 
-	auto rootBus = frg::construct<PciBus>(*kernelAlloc, nullptr, nullptr, io, nullptr, 0, range.from);
+	PciMsiController *msiController = nullptr;
+#if defined(__riscv) && __riscv_xlen == 64
+	struct ImsicPciMsiController : PciMsiController {
+		ImsicPciMsiController(Imsic *imsic) : imsic_{imsic} {}
+
+		MsiPin *allocateMsiPin(frg::string<KernelAlloc> name) override {
+			return allocateImsicMsi(name, imsic_);
+		}
+
+	private:
+		Imsic *imsic_;
+	};
+
+	auto resolveImsic = [node] -> Imsic * {
+		auto msiParentProp = node->dtNode().findProperty("msi-parent");
+		if (!msiParentProp) {
+			infoLogger() << "thor: PCI node has no msi-parent property" << frg::endlog;
+			return nullptr;
+		}
+
+		uint32_t msiParent;
+		if (!msiParentProp->access().readCells(msiParent, 1)) {
+			infoLogger() << "thor: Failed to read msi-parent from PCI node" << frg::endlog;
+			return nullptr;
+		}
+
+		auto *imsic = getImsicFromPhandle(msiParent);
+		if (!imsic)
+			infoLogger() << "thor: Failed to find the responsible IMSIC" << frg::endlog;
+		
+		return imsic;
+	};
+
+	if (auto *imsic = resolveImsic())
+		msiController = frg::construct<ImsicPciMsiController>(*kernelAlloc, imsic);
+#endif
+
+	auto rootBus = frg::construct<PciBus>(*kernelAlloc, nullptr, nullptr, io, msiController, 0, range.from);
 	rootBus->irqRouter = frg::construct<DtbPciIrqRouter>(*kernelAlloc, nullptr, rootBus, node);
 
 	for (auto &r : node->ranges()) {

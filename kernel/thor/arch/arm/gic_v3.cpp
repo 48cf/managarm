@@ -285,11 +285,11 @@ bool initGicV3() {
 	dist->init();
 
 	gicV3.initialize();
-	gic = gicV3.get();
+	irqController = gicV3.get();
 
 	initGicOnThisCpuV3();
 
-	gicNode->associateIrqController(gic);
+	gicNode->associateIrqController(gicV3.get());
 
 	return true;
 }
@@ -355,7 +355,7 @@ GicV3::GicV3() : irqPins_{*kernelAlloc} {
 	}
 }
 
-void GicV3::sendIpi(int cpuId, uint8_t id) {
+void GicV3::sendIpi(uint32_t cpuId, uint8_t id) {
 	auto affinity = getCpuData(cpuId)->affinity;
 	uint8_t aff0 = affinity;
 	uint8_t aff1 = affinity >> 8;
@@ -408,6 +408,11 @@ Gic::Pin *GicV3::getPin(uint32_t irq) {
 		return nullptr;
 
 	return irqPins_[irq];
+}
+
+IrqPin *GicV3::handleFiq() {
+	panicLogger() << "thor: We don't support FIQs on GICv3" << frg::endlog;
+	return nullptr;
 }
 
 }

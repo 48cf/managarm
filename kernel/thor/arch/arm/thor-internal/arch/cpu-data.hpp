@@ -33,6 +33,10 @@ struct GicCpuInterfaceV2;
 struct Thread;
 
 struct PlatformCpuData : public AssemblyCpuData {
+	static constexpr uint64_t ipiPing = UINT64_C(1) << 0;
+	static constexpr uint64_t ipiShootdown = UINT64_C(1) << 1;
+	static constexpr uint64_t ipiSelfCall = UINT64_C(1) << 2;
+
 	PlatformCpuData();
 
 	int cpuIndex;
@@ -46,6 +50,8 @@ struct PlatformCpuData : public AssemblyCpuData {
 
 	GicCpuInterfaceV2 *gicCpuInterfaceV2 = nullptr;
 	uint32_t affinity;
+
+	std::atomic<uint64_t> pendingIpis;
 };
 
 // Get a pointer to this CPU's PlatformCpuData instance.

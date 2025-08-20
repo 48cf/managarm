@@ -7,6 +7,15 @@
 #include <thor-internal/thread.hpp>
 #include <assert.h>
 
+namespace {
+
+bool raiseIpiBit(thor::CpuData *dstData, uint64_t bit) {
+	auto alreadyPending = dstData->pendingIpis.fetch_or(bit, std::memory_order_acq_rel);
+	return !(alreadyPending & bit);
+}
+
+} // namespace
+
 namespace thor {
 
 extern "C" void *thorExcVectors;
@@ -24,15 +33,25 @@ void suspendSelf() {
 }
 
 void sendPingIpi(CpuData *dstData) {
-	gic->sendIpi(dstData->cpuIndex, 0);
+	if (raiseIpiBit(dstData, PlatformCpuData::ipiPing)) {
+		irqController->sendIpi(dstData->cpuIndex, 0);
+	}
 }
 
 void sendShootdownIpi() {
-	gic->sendIpiToOthers(1);
+	// TODO: Look at the equivalent function in kernel/thor/arch/riscv/ints.cpp
+	for (size_t i = 0; i < getCpuCount(); ++i) {
+		auto dstData = getCpuData(i);
+		if (raiseIpiBit(dstData, PlatformCpuData::ipiShootdown)) {
+			irqController->sendIpi(dstData->cpuIndex, 0);
+		}
+	}
 }
 
 void sendSelfCallIpi() {
-	gic->sendIpi(getCpuData()->cpuIndex, 2);
+	if (raiseIpiBit(getCpuData(), PlatformCpuData::ipiSelfCall)) {
+		irqController->sendIpi(getCpuData()->cpuIndex, 0);
+	}
 }
 
 extern "C" void onPlatformInvalidException(FaultImageAccessor image) {
@@ -217,7 +236,7 @@ static constexpr bool logSpurious = false;
 
 extern "C" void onPlatformIrq(IrqImageAccessor image) {
 	auto *cpuData = getCpuData();
-	auto [cpu, irq] = gic->getIrq();
+	auto [cpu, irq] = irqController->getIrq();
 
 	asm volatile ("isb" ::: "memory");
 
@@ -225,25 +244,29 @@ extern "C" void onPlatformIrq(IrqImageAccessor image) {
 		if constexpr (logSGIs)
 			infoLogger() << "thor: onPlatformIrq: on CPU " << getCpuData()->cpuIndex << ", got a SGI (no. " << irq << ") that originated from CPU " << cpu << frg::endlog;
 
-		gic->eoi(cpu, irq);
+		irqController->eoi(cpu, irq);
 
-		if (irq == 0) {
+		auto mask = cpuData->pendingIpis.exchange(0, std::memory_order_acq_rel);
+
+		if (mask & PlatformCpuData::ipiPing) {
 			localScheduler.get(cpuData).forcePreemptionCall();
-		} else if (irq == 1) {
+		}
+
+		if (mask & PlatformCpuData::ipiShootdown) {
 			assert(!irqMutex().nesting());
 			disableUserAccess();
-
+	
 			for(auto &binding : asidData.get()->bindings)
 				binding.shootdown();
-
+	
 			asidData.get()->globalBinding.shootdown();
-		} else if (irq == 2) {
+		}
+
+		if (mask & PlatformCpuData::ipiSelfCall) {
 			assert(!irqMutex().nesting());
 			disableUserAccess();
-
+	
 			SelfIntCallBase::runScheduledCalls();
-		} else {
-			panicLogger() << "Received unexpected SGI number " << irq << frg::endlog;
 		}
 
 		localScheduler.get(cpuData).checkPreemption(image);
@@ -252,8 +275,20 @@ extern "C" void onPlatformIrq(IrqImageAccessor image) {
 			infoLogger() << "thor: on CPU " << getCpuData()->cpuIndex << ", spurious IRQ " << irq << " occured" << frg::endlog;
 		// no need to EOI spurious irqs
 	} else {
-		handleIrq(image, gic->getPin(irq));
+		handleIrq(image, irqController->getPin(irq));
 	}
+}
+
+extern "C" void onPlatformFiq(IrqImageAccessor image) {
+	auto irq = irqController->handleFiq();
+	if (irq == nullptr) {
+		if constexpr (logSpurious) {
+			infoLogger() << "thor: Spurious FIQ on CPU " << getCpuData()->cpuIndex << frg::endlog;
+		}
+		return;
+	}
+
+	handleIrq(image, irq);
 }
 
 extern "C" void onPlatformWork() {

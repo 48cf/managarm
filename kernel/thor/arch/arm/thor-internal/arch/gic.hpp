@@ -1,6 +1,7 @@
 #pragma once
 
 #include <initgraph.hpp>
+#include <thor-internal/arch/irq-controller.hpp>
 #include <thor-internal/arch-generic/cpu.hpp>
 #include <thor-internal/dtb/irq.hpp>
 #include <thor-internal/irq.hpp>
@@ -8,18 +9,7 @@
 
 namespace thor {
 
-struct Gic : dt::IrqController {
-	virtual void sendIpi(int cpuId, uint8_t id) = 0;
-	virtual void sendIpiToOthers(uint8_t id) = 0;
-
-	struct CpuIrq {
-		uint32_t cpu;
-		uint32_t irq;
-	};
-
-	virtual CpuIrq getIrq() = 0;
-	virtual void eoi(uint32_t cpuId, uint32_t id) = 0;
-
+struct Gic : IrqController {
 	struct Pin : public IrqPin {
 		virtual ~Pin() = default;
 
@@ -35,9 +25,6 @@ struct Gic : dt::IrqController {
 
 		virtual void endOfInterrupt() override = 0;
 	};
-
-	virtual Pin *setupIrq(uint32_t irq, TriggerMode trigger) = 0;
-	virtual Pin *getPin(uint32_t irq) = 0;
 
 	IrqPin *resolveDtIrq(dtb::Cells irqSpecifier) override {
 		if (irqSpecifier.numCells() != 3 && irqSpecifier.numCells() != 4)
@@ -103,6 +90,6 @@ initgraph::Stage *getIrqControllerReadyStage();
 
 void initGicOnThisCpu();
 
-extern Gic *gic;
+extern IrqController *irqController;
 
 }

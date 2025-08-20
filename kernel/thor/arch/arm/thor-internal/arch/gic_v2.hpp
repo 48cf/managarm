@@ -86,7 +86,7 @@ private:
 };
 
 struct GicV2 : public Gic {
-	void sendIpi(int cpuId, uint8_t id) override;
+	void sendIpi(uint32_t cpuId, uint8_t id) override;
 	void sendIpiToOthers(uint8_t id) override;
 
 	CpuIrq getIrq() override;
@@ -94,6 +94,8 @@ struct GicV2 : public Gic {
 
 	Pin *setupIrq(uint32_t irq, TriggerMode trigger) override;
 	Pin *getPin(uint32_t irq) override;
+
+	IrqPin *handleFiq() override;
 };
 
 bool initGicV2();

@@ -1,8 +1,46 @@
-#include <thor-internal/arch/debug.hpp>
-#include <thor-internal/elf-notes.hpp>
-#include <eir/interface.hpp>
 #include <arch/aarch64/mem_space.hpp>
 #include <arch/register.hpp>
+#include <eir/interface.hpp>
+#include <thor-internal/arch/debug.hpp>
+#include <thor-internal/elf-notes.hpp>
+
+namespace {
+
+namespace pl011 {
+
+namespace regs {
+
+static constexpr arch::scalar_register<uint32_t> data{0x00};
+static constexpr arch::bit_register<uint32_t> status{0x18};
+
+} // namespace regs
+
+namespace status {
+
+static constexpr arch::field<uint32_t, bool> txFull{5, 1};
+
+} // namespace status
+
+} // namespace pl011
+
+namespace s5l {
+
+namespace regs {
+
+static constexpr arch::bit_register<uint32_t> status{0x10};
+static constexpr arch::scalar_register<uint32_t> data{0x20};
+
+} // namespace regs
+
+namespace status {
+
+static constexpr arch::field<uint32_t, bool> txEmpty{1, 1};
+
+} // namespace status
+
+} // namespace s5l
+
+} // namespace
 
 namespace thor {
 
@@ -14,17 +52,6 @@ void setupDebugging() {
 	if (debugToSerial)
 		enableLogHandler(&uartLogHandler);
 }
-
-namespace {
-	namespace reg {
-		static constexpr arch::scalar_register<uint32_t> data{0x00};
-		static constexpr arch::bit_register<uint32_t> status{0x18};
-	}
-
-	namespace status {
-		static constexpr arch::field<uint32_t, bool> tx_full{5, 1};
-	};
-} // namespace anonymous
 
 extern ManagarmElfNote<BootUartConfig> bootUartConfig;
 THOR_DEFINE_ELF_NOTE(bootUartConfig){elf_note_type::bootUartConfig, {}};
@@ -39,7 +66,7 @@ void UartLogHandler::emit(frg::string_view record) {
 void UartLogHandler::emitUrgent(frg::string_view record) {
 	auto [md, msg] = destructureLogRecord(record);
 	const char *prefix = "URGENT: ";
-	while(*prefix)
+	while (*prefix)
 		printChar(*(prefix++));
 	for (size_t i = 0; i < msg.size(); ++i)
 		printChar(msg[i]);
@@ -47,18 +74,25 @@ void UartLogHandler::emitUrgent(frg::string_view record) {
 }
 
 void UartLogHandler::printChar(char c) {
-	if (bootUartConfig->type != BootUartType::pl011)
+	if (bootUartConfig->type == BootUartType::none) {
 		return;
-
-	arch::mem_space space{bootUartConfig->address};
+	}
 
 	// We assume here that Eir has mapped the UART as device memory, and
 	// configured the UART to some sensible settings (115200 8N1).
+	arch::mem_space space{bootUartConfig->address};
 
-	while (space.load(reg::status) & status::tx_full)
-		;
+	if (bootUartConfig->type == BootUartType::pl011) {
+		while (space.load(pl011::regs::status) & pl011::status::txFull) {
+		}
 
-	space.store(reg::data, c);
+		space.store(pl011::regs::data, c);
+	} else if (bootUartConfig->type == BootUartType::s5l) {
+		while (!(space.load(s5l::regs::status) & s5l::status::txEmpty)) {
+		}
+
+		space.store(s5l::regs::data, c);
+	}
 }
 
 } // namespace thor

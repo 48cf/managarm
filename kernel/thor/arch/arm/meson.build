@@ -13,6 +13,8 @@ src += files(
 	'system.cpp',
 	'smp.cpp',
 	'timer.cpp',
+
+	'apple/aic.cpp',
 )
 
 trampoline = custom_target('trampoline',

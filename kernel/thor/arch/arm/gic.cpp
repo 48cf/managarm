@@ -6,7 +6,7 @@
 
 namespace thor {
 
-Gic *gic;
+IrqController *irqController;
 static uint8_t gicVersion;
 
 static initgraph::Task initGic{&globalInitEngine, "arm.init-gic",
@@ -18,10 +18,11 @@ static initgraph::Task initGic{&globalInitEngine, "arm.init-gic",
 			gicVersion = 2;
 		} else if (initGicV3()) {
 			gicVersion = 3;
-		} else {
-			assert(!"Failed to find GIC");
 		}
-		initGicOnThisCpu();
+
+		if (gicVersion != 0) {
+			initGicOnThisCpu();
+		}
 	}
 };
 

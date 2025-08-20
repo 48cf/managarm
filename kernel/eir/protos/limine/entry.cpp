@@ -24,7 +24,7 @@ namespace {
 	}
 
 [[gnu::used, gnu::section(".requestsStartMarker")]] volatile LIMINE_REQUESTS_START_MARKER;
-[[gnu::used, gnu::section(".requests")]] volatile LIMINE_BASE_REVISION(3);
+[[gnu::used, gnu::section(".requests")]] volatile LIMINE_BASE_REVISION(0);
 LIMINE_REQUEST(memmap_request, LIMINE_MEMMAP_REQUEST, 0);
 LIMINE_REQUEST(hhdm_request, LIMINE_HHDM_REQUEST, 0);
 LIMINE_REQUEST(riscv_bsp_hartid_request, LIMINE_RISCV_BSP_HARTID_REQUEST, 0);
@@ -112,6 +112,8 @@ initgraph::Task setupMemoryRegions{
 };
 
 } // namespace
+
+// void debugPrintChar(char c) { *(volatile uint32_t*)(0x9000000 + hhdm_request.response->offset) = c; }
 
 extern "C" void eirLimineMain(void) {
 	initPlatform();

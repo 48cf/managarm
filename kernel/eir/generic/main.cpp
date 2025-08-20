@@ -192,13 +192,13 @@ physaddr_t bootReserve(size_t length, size_t alignment) {
 		BuddyAccessor accessor{
 		    regions[i].address, pageShift, table, regions[i].numRoots, regions[i].order
 		};
-		auto physical = accessor.allocate(0, 32);
+		auto physical = accessor.allocate(0, 48);
 		if (physical == BuddyAccessor::illegalAddress)
 			continue;
 		return physical;
 	}
 
-	eir::panicLogger() << "Eir: Out of memory" << frg::endlog;
+	eir::panicLogger() << "Eir: Out of memory 1" << frg::endlog;
 	__builtin_unreachable();
 }
 
@@ -211,14 +211,14 @@ physaddr_t allocPage() {
 		BuddyAccessor accessor{
 		    regions[i].address, pageShift, table, regions[i].numRoots, regions[i].order
 		};
-		auto physical = accessor.allocate(0, 32);
+		auto physical = accessor.allocate(0, 48);
 		if (physical == BuddyAccessor::illegalAddress)
 			continue;
 		allocatedMemory += pageSize;
 		return physical;
 	}
 
-	eir::panicLogger() << "Eir: Out of memory" << frg::endlog;
+	eir::panicLogger() << "Eir: Out of memory 2" << frg::endlog;
 	__builtin_unreachable();
 }
 

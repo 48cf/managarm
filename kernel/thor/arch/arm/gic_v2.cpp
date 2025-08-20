@@ -384,9 +384,9 @@ bool initGicV2() {
 
 	cpuInterfaceAddr = gicNode->reg()[1].addr;
 	cpuInterfaceSize = gicNode->reg()[1].size;
-	gic = &gicV2;
+	irqController = &gicV2;
 
-	gicNode->associateIrqController(gic);
+	gicNode->associateIrqController(&gicV2);
 
 	return true;
 }
@@ -404,7 +404,7 @@ void initGicOnThisCpuV2() {
 // Generic interface
 // --------------------------------------------------------------------
 
-void GicV2::sendIpi(int cpuId, uint8_t id) {
+void GicV2::sendIpi(uint32_t cpuId, uint8_t id) {
 	dist->sendIpi(getCpuData(cpuId)->gicCpuInterfaceV2->interfaceNumber(), id);
 }
 
@@ -429,5 +429,9 @@ Gic::Pin *GicV2::getPin(uint32_t irq) {
 	return dist->getPin(irq);
 }
 
+IrqPin *GicV2::handleFiq() {
+	panicLogger() << "thor: We don't support FIQs on GICv2" << frg::endlog;
+	return nullptr;
+}
 
 } // namespace thor

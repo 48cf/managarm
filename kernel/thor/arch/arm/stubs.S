@@ -18,12 +18,12 @@ thorExcVectors:
 
 	MAKE_EXC_ENTRY el1SyncStub // EL1h sync
 	MAKE_EXC_ENTRY el1IrqStub // EL1h irq
-	MAKE_EXC_ENTRY el1InvalidExcStub // EL1h fiq
+	MAKE_EXC_ENTRY el1FiqStub // EL1h fiq
 	MAKE_EXC_ENTRY el1SErrorStub // EL1h error
 
 	MAKE_EXC_ENTRY el0SyncStub // EL0 sync
 	MAKE_EXC_ENTRY el0IrqStub // EL0 irq
-	MAKE_EXC_ENTRY el0InvalidExcStub  // EL0 fiq
+	MAKE_EXC_ENTRY el0FiqStub  // EL0 fiq
 	MAKE_EXC_ENTRY el0SErrorStub // EL0 error
 
 	MAKE_EXC_ENTRY el0InvalidExcStub // EL0 AArch32 sync
@@ -248,10 +248,12 @@ MAKE_STUB el0InvalidExcStub, onPlatformInvalidException, 0, .L_faultDomain, THOR
 
 MAKE_STUB el1SyncStub, onPlatformSyncFault, 1, .L_faultDomain, THOR_TP_EXCEPTION_STACK
 MAKE_STUB el1IrqStub, onPlatformIrq, 1, .L_irqDomain, THOR_TP_IRQ_STACK
+MAKE_STUB el1FiqStub, onPlatformFiq, 1, .L_irqDomain, THOR_TP_IRQ_STACK
 MAKE_STUB el1SErrorStub, onPlatformAsyncFault, 1, .L_faultDomain, THOR_TP_EXCEPTION_STACK
 
 MAKE_STUB el0SyncStub, onPlatformSyncFault, 0, .L_faultDomain, THOR_TP_EXCEPTION_STACK
 MAKE_STUB el0IrqStub, onPlatformIrq, 0, .L_irqDomain, THOR_TP_IRQ_STACK
+MAKE_STUB el0FiqStub, onPlatformFiq, 0, .L_irqDomain, THOR_TP_IRQ_STACK
 MAKE_STUB el0SErrorStub, onPlatformAsyncFault, 0, .L_faultDomain, THOR_TP_EXCEPTION_STACK
 
 .global workStub

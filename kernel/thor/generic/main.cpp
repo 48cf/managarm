@@ -33,7 +33,7 @@ static constexpr bool logInitialization = false;
 static constexpr bool logEveryPageFault = false;
 static constexpr bool logUnhandledPageFaults = false;
 static constexpr bool logEveryIrq = false;
-static constexpr bool logOtherFaults = false;
+static constexpr bool logOtherFaults = true;
 static constexpr bool logEverySyscall = false;
 
 bool debugToSerial = false;
@@ -66,6 +66,20 @@ extern "C" InitializerPtr __init_array_end[];
 // This function performs early initialization.
 // It is called *before* running global constructors.
 extern "C" void thorInitialize() {
+	// {
+	// 	uint64_t fbBase = 0xffff800090200000;
+	// 	uint64_t fbWidth = 2560;
+	// 	uint64_t fbHeight = 1600;
+		
+	// 	// auto &fb = getEirInfo()->frameBuffer;
+	// 	for (size_t y = 0; y < fbHeight; y++) {
+	// 		for (size_t x = 0; x < fbWidth; x++) {
+	// 			uint64_t offset = (y * fbWidth + x) * 4;
+	// 			*(volatile uint32_t *)(fbBase + offset) = 0xffffffff;
+	// 		}
+	// 	}
+	// }
+
 	initializeArchitecture();
 
 	if(getEirInfo()->debugFlags & eirDebugSerial)
@@ -428,15 +442,15 @@ void handlePageFault(FaultImageAccessor image, uintptr_t address, Word errorCode
 
 		return;
 	}
+	
+	if(logEveryPageFault)
+		logFault();
 
 	smarter::borrowed_ptr<Thread> this_thread = getCurrentThread();
 	assert(this_thread.get());
 
 	auto address_space = this_thread->getAddressSpace();
 	assert(!(errorCode & kPfBadTable));
-
-	if(logEveryPageFault)
-		logFault();
 
 	// Panic on SMAP violations.
 	if(image.inKernelDomain()) {

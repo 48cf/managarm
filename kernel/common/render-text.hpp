@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <utility>
 
-constexpr uint32_t rgb(int r, int g, int b) { return (r << 16) | (g << 8) | b; }
+constexpr uint32_t rgb(int r, int g, int b) { return (r << 22) | (g << 12) | (b << 2); }
 
 inline constexpr uint32_t rgbColor[16] = {
     rgb(1, 1, 1),

@@ -96,7 +96,7 @@ static initgraph::Task initTimerIrq{&globalInitEngine, "arm.init-timer-irq",
 			[&] (DeviceTreeNode *parentNode, dtb::Cells irqCells) {
 				// This offset is defined in the Linux
 				// DTB binding for compatible nodes.
-				if (idx == 2) {
+				if (idx == 3) {
 					timerIrqParent = parentNode->getAssociatedIrqController();
 					timerIrq.initialize(irqCells);
 				}

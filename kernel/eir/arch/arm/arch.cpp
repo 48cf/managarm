@@ -88,8 +88,8 @@ mapSingle4kPage(address_t address, address_t physical, uint32_t flags, CachingMo
 
 	if (!(flags & PageFlags::write))
 		new_entry |= kPageRO;
-	if (!(flags & PageFlags::execute))
-		new_entry |= kPageXN | kPagePXN;
+	// if (!(flags & PageFlags::execute))
+	// 	new_entry |= kPageXN | kPagePXN;
 	if (!(flags & PageFlags::global))
 		new_entry |= kPageNotGlobal;
 
@@ -149,6 +149,9 @@ int getKernelVirtualBits() {
 void initProcessorEarly() {
 	eir::infoLogger() << "Starting Eir" << frg::endlog;
 
+	// uint64_t hcr_el2;
+	// asm volatile("mrs %0, hcr_el2" : "=r"(hcr_el2));
+
 	uint64_t aa64mmfr0;
 	asm volatile("mrs %0, id_aa64mmfr0_el1" : "=r"(aa64mmfr0));
 
@@ -164,7 +167,11 @@ void initProcessorEarly() {
 	                (UINT64_C(0b00000100) << 24) | // Device, nGnRE
 	                (UINT64_C(0b01000100) << 32);  // Normal Non-cacheable
 
-	asm volatile("msr mair_el1, %0" ::"r"(mair));
+	// if (hcr_el2 & 0x34) {
+	// 	asm volatile("msr s3_5_c10_c2_0, %0" ::"r"(mair));
+	// } else {
+		asm volatile("msr mair_el1, %0" ::"r"(mair));
+	// }
 
 	uint64_t tcr = (16 << 0) |            // T0SZ=16
 	               (16 << 16) |           // T1SZ=16
@@ -177,7 +184,11 @@ void initProcessorEarly() {
 	               (uint64_t(pa) << 32) | // 48-bit intermediate address
 	               (uint64_t(2) << 30);   // TTBR1 4K granule
 
-	asm volatile("msr tcr_el1, %0" ::"r"(tcr));
+	// if (hcr_el2 & 0x34) {
+	// 	asm volatile("msr s3_5_c2_c0_2, %0" ::"r"(tcr));
+	// } else {
+		asm volatile("msr tcr_el1, %0" ::"r"(tcr));
+	// }
 }
 
 void initProcessorPaging() {
@@ -192,8 +203,15 @@ void initProcessorPaging() {
 #if !defined(EIR_UEFI)
 	auto floor = reinterpret_cast<address_t>(&eirImageFloor) & ~address_t{0xFFF};
 	auto ceiling = (reinterpret_cast<address_t>(&eirImageCeiling) + 0xFFF) & ~address_t{0xFFF};
-	for (address_t addr = floor; addr < ceiling; addr += 0x1000)
-		mapSingle4kPage(addr, addr, PageFlags::write | PageFlags::execute);
+	for (address_t addr = floor; addr < ceiling; addr += 0x1000) {
+		if (kernel_physical != SIZE_MAX) {
+			mapSingle4kPage(
+			    addr, addr - floor + kernel_physical, PageFlags::write | PageFlags::execute
+			);
+		} else {
+			mapSingle4kPage(addr, addr, PageFlags::write | PageFlags::execute);
+		}
+	}
 #endif
 
 	mapRegionsAndStructs();

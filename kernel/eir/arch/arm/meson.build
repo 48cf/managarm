@@ -26,6 +26,7 @@ eir_cpp_args += ['-mgeneral-regs-only', '-mno-unaligned-access']
 eir_c_args += ['-mgeneral-regs-only', '-mno-unaligned-access']
 
 if not build_uefi
+	subdir('platform/apple')
 	subdir('platform/raspi4')
 	subdir('platform/virt')
 endif

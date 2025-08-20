@@ -215,6 +215,7 @@ struct SmbiosData {
 enum class BootUartType {
 	none,
 	pl011,
+	s5l,
 };
 
 struct BootUartConfig {

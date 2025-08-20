@@ -1,6 +1,6 @@
-if host_machine.cpu_family() not in ['x86_64', 'riscv64']
-	subdir_done()
-endif
+# if host_machine.cpu_family() not in ['x86_64', 'riscv64']
+# 	subdir_done()
+# endif
 
 eir_limine_sources = [
 	eir_generic_main,
@@ -16,6 +16,11 @@ if host_machine.cpu_family() == 'x86_64'
 	]
 	eir_limine_c_args += ['-mcmodel=kernel']
 	eir_limine_cpp_args += ['-mcmodel=kernel']
+elif host_machine.cpu_family() == 'aarch64'
+	eir_limine_sources += [
+		eir_sources,
+		'../../arch/arm/platform/virt/virt.cpp',
+	]
 elif host_machine.cpu_family() == 'riscv64'
 	eir_limine_sources += [
 		eir_sources,

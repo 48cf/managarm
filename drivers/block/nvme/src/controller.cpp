@@ -1,5 +1,5 @@
 #include <arch/bit.hpp>
-#include <format>
+#include <print>
 #include <helix/timer.hpp>
 #include <protocols/mbus/client.hpp>
 
@@ -346,30 +346,46 @@ async::result<void> Controller::scanNamespaces() {
 	serial = std::string{idCtrl.sn, sizeof(idCtrl.sn)};
 	fw_rev = std::string{idCtrl.fr, sizeof(idCtrl.fr)};
 
-	if (version_ >= flags::vs::version(1, 1, 0)) {
-		auto nsList = arch::dma_array<uint32_t>{nullptr, 1024};
-		int numLists = (nn + 1023) >> 10;
-		unsigned int prev = 0;
-		for (auto i = 0; i < numLists; i++) {
-			if (!(co_await identifyNamespaceList(prev, nsList.view_buffer())).first.successful())
-				co_return;
-
-			int j;
-			for (j = 0; j < std::min((int)nn, 1024); j++) {
-				auto nsid = convert_endian<endian::little>(nsList[j]);
-				if (!nsid)
-					co_return;
-
-				co_await createNamespace(nsid);
-
-				prev = nsid;
-			}
-
-			nn -= j;
-		}
-
-		co_return;
+	// Strip any trailing spaces from the strings.
+	while (!model.empty() && model.back() == ' ') {
+		model.pop_back();
 	}
+
+	while (!serial.empty() && serial.back() == ' ') {
+		serial.pop_back();
+	}
+
+	while (!fw_rev.empty() && fw_rev.back() == ' ') {
+		fw_rev.pop_back();
+	}
+
+	std::println("block/nvme: found controller model '{}' fw_rev '{}' serial '{}', {} namespaces",
+		model, fw_rev, serial, nn);
+
+	// if (version_ >= flags::vs::version(1, 1, 0)) {
+	// 	auto nsList = arch::dma_array<uint32_t>{nullptr, 1024};
+	// 	int numLists = (nn + 1023) >> 10;
+	// 	unsigned int prev = 0;
+	// 	for (auto i = 0; i < numLists; i++) {
+	// 		if (!(co_await identifyNamespaceList(prev, nsList.view_buffer())).first.successful())
+	// 			co_return;
+
+	// 		int j;
+	// 		for (j = 0; j < std::min((int)nn, 1024); j++) {
+	// 			auto nsid = convert_endian<endian::little>(nsList[j]);
+	// 			if (!nsid)
+	// 				co_return;
+
+	// 			co_await createNamespace(nsid);
+
+	// 			prev = nsid;
+	// 		}
+
+	// 		nn -= j;
+	// 	}
+
+	// 	co_return;
+	// }
 
 	for (int i = 1; i <= nn; i++) {
 		co_await createNamespace(i);

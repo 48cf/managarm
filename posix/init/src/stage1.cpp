@@ -226,6 +226,58 @@ int main() {
 		execl("/usr/bin/runsvr", "/usr/bin/runsvr", "runsvr", "/usr/bin/storage", nullptr);
 	}else assert(block_usb != -1);
 
+#if defined(__aarch64__) || (defined(__riscv) && __riscv_xlen == 64)
+	auto mailboxd = fork();
+	if (!mailboxd) {
+		std::cout << "init: Starting mailboxd" << std::endl;
+		execl("/usr/bin/runsvr", "/usr/bin/runsvr", "run", "/usr/lib/managarm/server/mailboxd.bin", nullptr);
+	} else {
+		assert(mailboxd != -1);
+	}
+#endif
+
+	sleep(1);
+
+	auto appleAns2MbusIds = async::run(
+	    [] -> async::result<std::vector<mbus_ng::EntityId>> {
+		    auto filter =
+		        mbus_ng::Conjunction{{mbus_ng::EqualsFilter{"dt.compatible=apple,nvme-ans2", ""}}};
+
+		    auto enumerator = mbus_ng::Instance::global().enumerate(filter);
+		    auto [_, events] = (co_await enumerator.nextEvents()).unwrap();
+
+		    std::vector<mbus_ng::EntityId> ids;
+
+		    for (const auto &event : events) {
+			    if (event.type == mbus_ng::EnumerationEvent::Type::created) {
+				    ids.push_back(event.id);
+			    }
+		    }
+
+		    co_return ids;
+	    }(),
+	    helix::currentDispatcher
+	);
+
+	for (auto entityId : appleAns2MbusIds) {
+		auto pid = fork();
+		if (!pid) {
+			auto mbusIdString = std::format("MBUS_ID={}", entityId);
+			const char *env[] = {mbusIdString.c_str(), nullptr};
+			execle(
+			    "/usr/bin/runsvr",
+			    "/usr/bin/runsvr",
+			    "--fork",
+			    "bind",
+			    "/usr/lib/managarm/server/block-nvme.bin",
+			    nullptr,
+			    env
+			);
+		} else {
+			assert(pid != -1);
+		}
+	}
+
 	Cmdline cmdlineHelper{};
 	auto cmdline = async::run(cmdlineHelper.get(), helix::currentDispatcher);
 

@@ -1,4 +1,5 @@
 src = [
+	'src/apple.cpp',
 	'src/main.cpp',
 	'src/controller.cpp',
 	'src/queue.cpp',
@@ -9,7 +10,7 @@ src = [
 ]
 
 executable('block-nvme', src,
-	dependencies : [ libarch, hw_proto_dep, mbus_proto_dep, libblockfs_dep, core_dep, svrctl_proto_dep ],
+	dependencies : [ libarch, hw_proto_dep, mbus_proto_dep, libapple_rtkit_dep, libapple_sart_dep, libblockfs_dep, core_dep, svrctl_proto_dep ],
 	install : true
 )
 

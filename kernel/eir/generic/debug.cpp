@@ -53,7 +53,7 @@ void OutputSink::print(char c) {
 		} else if (outputY >= displayHeight / fontHeight) {
 			// TODO: Scroll.
 		} else {
-			renderChars(
+			renderChars<fontWidth, fontHeight, 1>(
 			    displayFb,
 			    displayPitch / sizeof(uint32_t),
 			    outputX,

@@ -269,6 +269,7 @@ coroutine<void> executeModule(frg::string_view name, MfsRegular *module,
 	auto space = AddressSpace::create();
 
 	ImageInfo exec_info = co_await loadModuleImage(space, 0, module->getMemory());
+	infoLogger() << "starting server " << name << " with entry_ip=" << frg::hex_fmt{exec_info.entryIp} << frg::endlog;
 
 	if(size_t n = frg::string_view(exec_info.interpreter).find_first('\0'); n != size_t(-1))
 		exec_info.interpreter.resize(n);

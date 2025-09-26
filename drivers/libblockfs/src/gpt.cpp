@@ -30,9 +30,15 @@ async::result<std::pair<char *, DiskHeader *>> Table::probeSectorSize_(size_t se
 	auto headerBuffer = new char[deviceSectors * getDevice()->sectorSize];
 	co_await getDevice()->readSectors(deviceGptSector, headerBuffer, deviceSectors);
 
+	std::println(std::cout, "libblockfs: probing gpt sector size {}", sectorSize);
+
 	DiskHeader *header = reinterpret_cast<DiskHeader *>(headerBuffer + deviceGptOffset);
-	if (header->signature == 0x5452415020494645)
+	if (header->signature == 0x5452415020494645) {
+		std::println(std::cout, "libblockfs: found gpt header at sector size {}", sectorSize);
 		co_return std::make_pair(headerBuffer, header);
+	}
+
+	std::println(std::cout, "libblockfs: no gpt header at sector size {}", sectorSize);
 
 	delete[] headerBuffer;
 	co_return std::make_pair(nullptr, nullptr);
@@ -42,6 +48,9 @@ async::result<void> Table::parse() {
 	// probe for the gpt header
 	auto header = co_await probeSectorSize_(getDevice()->sectorSize);
 	if (!header.first) {
+		std::println(std::cout, "libblockfs: native sector size {} does not have gpt header",
+			getDevice()->sectorSize);
+
 		// try other sizes
 		for (auto size : commonSectorSizes) {
 			if (size == getDevice()->sectorSize)
@@ -49,16 +58,23 @@ async::result<void> Table::parse() {
 
 			header = co_await probeSectorSize_(size);
 			if (header.first) {
+				std::println(std::cout, "libblockfs: sector size {}", size);
 				gptSectorSize_ = size;
 				break;
 			}
 		}
 
 		// TODO: handle this error
-		assert(header.first);
+		if (!header.first) {
+			std::println(std::cout, "libblockfs: no gpt header found");
+			co_return;
+		}
 
 		std::println(std::cout, "libblockfs: using non-native gpt sector size {}",
 			gptSectorSize_);
+	} else {
+		std::println(std::cout, "libblockfs: using native gpt sector size {}",
+			getDevice()->sectorSize);
 	}
 
 	size_t deviceTableSector = (header.second->entryTableLba * gptSectorSize_) / getDevice()->sectorSize;

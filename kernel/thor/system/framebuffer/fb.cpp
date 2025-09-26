@@ -49,11 +49,11 @@ private:
 };
 
 size_t FbDisplay::getWidth() {
-	return _width / fontWidth;
+	return _width / (fontWidth * 2);
 }
 
 size_t FbDisplay::getHeight() {
-	return _height / fontHeight;
+	return _height / (fontHeight * 2);
 }
 
 void FbDisplay::setChars(unsigned int x, unsigned int y,
@@ -66,11 +66,11 @@ void FbDisplay::setChars(unsigned int x, unsigned int y,
 void FbDisplay::setBlanks(unsigned int x, unsigned int y, int count, int bg) {
 	auto bg_rgb = (bg < 0) ? defaultBg : rgbColor[bg];
 
-	auto dest_line = _window + y * fontHeight * _pitch + x * fontWidth;
-	for(size_t i = 0; i < fontHeight; i++) {
+	auto dest_line = _window + y * (fontHeight * 2) * _pitch + x * (fontWidth * 2);
+	for(size_t i = 0; i < (fontHeight * 2); i++) {
 		auto dest = dest_line;
 		for(int k = 0; k < count; k++) {
-			for(size_t j = 0; j < fontWidth; j++)
+			for(size_t j = 0; j < (fontWidth * 2); j++)
 				*dest++ = bg_rgb;
 		}
 		dest_line += _pitch;

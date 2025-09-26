@@ -225,7 +225,11 @@ static initgraph::Task initBootProcessorTask{&globalInitEngine, "arm.init-boot-p
 		infoLogger() << "Booting on CPU #0" << frg::endlog;
 
 		if (isKernelInEl2()) {
+			uint64_t hcr_el2;
+			asm volatile ("mrs %0, hcr_el2" : "=r"(hcr_el2));
+
 			infoLogger() << "Booting in EL2" << frg::endlog;
+			infoLogger() << "HCR_EL2 = " << frg::hex_fmt{hcr_el2} << frg::endlog;
 		} else {
 			infoLogger() << "Booting in EL1" << frg::endlog;
 		}

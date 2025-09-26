@@ -1,7 +1,10 @@
-use std::mem::MaybeUninit;
+use std::{cell::Cell, mem::MaybeUninit};
 
-use crate::submission::result::{
-    FromQueueElement, HandleResult, InlineResult, LengthResult, SimpleResult,
+use crate::{
+    Handle,
+    submission::result::{
+        FromQueueElement, HandleResult, InlineResult, LengthResult, SimpleResult,
+    },
 };
 
 const fn default_hel_action() -> hel_sys::HelAction {
@@ -124,6 +127,40 @@ impl<T: Action> Action for Offer<T> {
     }
 }
 
+pub struct Accept<T: Action> {
+    action: T,
+}
+
+impl<T: Action> Accept<T> {
+    pub fn new(action: T) -> Self {
+        Self { action }
+    }
+}
+
+impl<T: Action> Action for Accept<T> {
+    const ACTION_COUNT: usize = T::ACTION_COUNT + 1;
+
+    type Output = (HandleResult, T::Output);
+
+    fn to_hel_actions(&self, has_next: bool, buffer: &mut [MaybeUninit<hel_sys::HelAction>]) {
+        let mut action = default_hel_action();
+
+        action.type_ = hel_sys::kHelActionAccept as _;
+
+        if has_next {
+            action.flags = hel_sys::kHelItemChain;
+        }
+
+        if T::ACTION_COUNT > 0 {
+            action.flags |= hel_sys::kHelItemAncillary;
+        }
+
+        buffer[0].write(action);
+
+        self.action.to_hel_actions(false, &mut buffer[1..]);
+    }
+}
+
 pub struct SendBuffer<'a> {
     data: &'a [u8],
 }
@@ -195,6 +232,46 @@ impl Action for ReceiveInline {
         let mut action = default_hel_action();
 
         action.type_ = hel_sys::kHelActionRecvInline as _;
+
+        if has_next {
+            action.flags = hel_sys::kHelItemChain;
+        }
+
+        buffer[0].write(action);
+    }
+}
+
+pub struct PushDescriptor {
+    handle: Cell<Option<Handle>>,
+}
+
+impl PushDescriptor {
+    pub fn new(handle: Handle) -> Self {
+        Self {
+            handle: Cell::new(Some(handle)),
+        }
+    }
+}
+
+impl Action for PushDescriptor {
+    const ACTION_COUNT: usize = 1;
+
+    type Output = SimpleResult;
+
+    fn to_hel_actions(&self, has_next: bool, buffer: &mut [MaybeUninit<hel_sys::HelAction>]) {
+        let mut action = default_hel_action();
+
+        let handle = self.handle.replace(None);
+        let raw_handle = handle
+            .as_ref()
+            .expect("Action was used multiple times")
+            .handle();
+
+        // Make sure the handle doesn't get dropped.
+        std::mem::forget(handle);
+
+        action.type_ = hel_sys::kHelActionPushDescriptor as _;
+        action.handle = raw_handle;
 
         if has_next {
             action.flags = hel_sys::kHelItemChain;

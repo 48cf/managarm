@@ -145,6 +145,17 @@ private:
 	std::vector<uint8_t> data_;
 };
 
+struct MailboxChannel {
+	MailboxChannel(helix::UniqueLane lane, uint32_t id) : _id(id), _lane(std::move(lane)) {};
+
+	async::result<void> sendMessage(const void *data, size_t length);
+	async::result<void> receiveMessage(void *data, size_t length);
+
+private:
+	uint32_t _id;
+	helix::UniqueLane _lane;
+};
+
 struct Device {
 	Device(helix::UniqueLane lane)
 	:_lane(std::move(lane)) { };
@@ -161,6 +172,9 @@ struct Device {
 	async::result<std::vector<std::pair<std::string, DtProperty>>> getDtProperties();
 	async::result<helix::UniqueDescriptor> accessDtRegister(uint32_t index);
 	async::result<helix::UniqueDescriptor> installDtIrq(uint32_t index);
+
+	async::result<std::optional<MailboxChannel>> accessMailbox(uint32_t index);
+	async::result<std::optional<MailboxChannel>> accessMailbox(std::string_view name);
 
 	async::result<void> claimDevice();
 	async::result<void> enableBusIrq();

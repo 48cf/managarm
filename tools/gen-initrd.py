@@ -62,6 +62,9 @@ add_file('usr/lib', 'usr/lib', 'libmbus.so')
 add_file('usr/lib', 'usr/lib', 'libostrace_protocol.so')
 add_file('usr/lib', 'usr/lib', 'libsvrctl_protocol.so')
 add_file('usr/lib', 'usr/lib', 'libusb_protocol.so')
+add_file('usr/lib', 'usr/lib', 'libapple_sart.so')
+add_file('usr/lib', 'usr/lib', 'libapple_rtkit.so')
+
 if args.arch == 'riscv64-managarm':
 	add_file('usr/lib', 'usr/lib', 'libgcc_s.so.1')
 	add_file('usr/lib', 'usr/lib', 'libstdc++.so.6')
@@ -86,6 +89,7 @@ add_file('usr/bin', 'usr/bin', 'block-nvme')
 add_file('usr/bin', 'usr/bin', 'storage')
 add_file('usr/bin', 'usr/bin', 'virtio-block')
 add_file('usr/bin', 'usr/bin', 'virtio-console')
+add_file('usr/bin', 'usr/bin', 'mailboxd')
 
 if args.arch == 'x86_64-managarm':
 	add_file('usr/bin', 'usr/bin', 'uhci')

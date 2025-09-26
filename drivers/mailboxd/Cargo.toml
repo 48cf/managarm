@@ -1,18 +1,15 @@
 [package]
-name = "managarm"
+name = "mailboxd"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.99"
-bragi = "0.2"
-thiserror = "2.0.16"
+async-lock = "3.4.1"
+bragi = "0.2.0"
 
 [dependencies.hel]
 workspace = true
 
-[dependencies.hel-sys]
+[dependencies.managarm]
 workspace = true
-
-[build-dependencies]
-bragi-build = "0.1"

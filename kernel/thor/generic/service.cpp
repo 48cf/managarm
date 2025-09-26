@@ -515,6 +515,20 @@ namespace posix {
 						assert(respError == Error::success);
 						break;
 					}
+					case managarm::posix::CntReqType::EPOLL_CALL: {
+						infoLogger() << "thor: Returning ILLEGAL_ARGUMENTS for EPOLL_CALL request" << frg::endlog;
+						managarm::posix::SvrResponse<KernelAlloc> resp(*kernelAlloc);
+						resp.set_error(managarm::posix::Errors::ILLEGAL_ARGUMENTS);
+
+						frg::string<KernelAlloc> ser(*kernelAlloc);
+						resp.SerializeToString(&ser);
+						frg::unique_memory<KernelAlloc> respBuffer{*kernelAlloc, ser.size()};
+						memcpy(respBuffer.data(), ser.data(), ser.size());
+						auto respError = co_await SendBufferSender{conversation, std::move(respBuffer)};
+						// TODO: improve error handling here.
+						assert(respError == Error::success);
+						break;
+					}
 					case managarm::posix::CntReqType::SIG_ACTION:
 						infoLogger() << "thor: Unexpected legacy POSIX request "
 							<< req->request_type() << frg::endlog;

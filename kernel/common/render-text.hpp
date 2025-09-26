@@ -29,14 +29,14 @@ inline constexpr uint32_t defaultBg = rgb(16, 16, 16);
 
 extern uint8_t fontBitmap[];
 
-template <int FontWidth, int FontHeight>
+template <int FontWidth, int FontHeight, int FontScale = 2>
 void
 renderChars(void *fb_ptr, unsigned int pitch, unsigned int x, unsigned int y, const char *c, int count, int fg, int bg, std::integral_constant<int, FontWidth>, std::integral_constant<int, FontHeight>) {
 	auto fg_rgb = rgbColor[fg];
 	auto bg_rgb = (bg < 0) ? defaultBg : rgbColor[bg];
 
 	auto fb = reinterpret_cast<uint32_t *>(fb_ptr);
-	auto line = fb + y * FontHeight * pitch + x * FontWidth;
+	auto line = fb + y * FontHeight * FontScale * pitch + x * FontWidth * FontScale;
 	for (size_t i = 0; i < FontHeight; i++) {
 		auto dest = line;
 		for (int k = 0; k < count; k++) {
@@ -44,10 +44,18 @@ renderChars(void *fb_ptr, unsigned int pitch, unsigned int x, unsigned int y, co
 			auto fontbits = fontBitmap[(dc - 32) * FontHeight + i];
 			for (size_t j = 0; j < FontWidth; j++) {
 				int bit = (1 << ((FontWidth - 1) - j));
-				*dest++ = (fontbits & bit) ? fg_rgb : bg_rgb;
+				uint32_t color = (fontbits & bit) ? fg_rgb : bg_rgb;
+				auto block_start = dest;
+				for (int sy = 0; sy < FontScale; sy++) {
+					for (int sx = 0; sx < FontScale; sx++) {
+						*dest++ = color;
+					}
+					dest += pitch - FontScale;
+				}
+				dest = block_start + FontScale;
 			}
 		}
-		line += pitch;
+		line += pitch * FontScale;
 	}
 
 	asm volatile("" : : : "memory");

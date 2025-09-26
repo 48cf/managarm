@@ -209,8 +209,10 @@ if build_drivers or provide_deps
 	core = [ 'core/drm', 'core/virtio', 'mbus' ]
 	posix = [ 'subsystem', 'init' ]
 	drivers = [
+		# needed for libapple-rtkit
+		'mailboxd',
 		# libraries
-		'libblockfs', 'libevbackend',
+		'libapple-rtkit', 'libapple-sart', 'libblockfs', 'libevbackend',
 		# storage
 		'block/ata', 'block/virtio-blk', 'block/ahci', 'block/nvme',
 		# net

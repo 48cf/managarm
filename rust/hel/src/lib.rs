@@ -19,9 +19,20 @@ pub use mapping::{Mapping, MappingFlags};
 pub use queue::Queue;
 pub use result::{Error, Result};
 pub use submission::{
-    action::{Offer, PullDescriptor, ReceiveBuffer, ReceiveInline, SendBuffer},
+    action::{
+        Accept, Offer, PullDescriptor, PushDescriptor, ReceiveBuffer, ReceiveInline, SendBuffer,
+    },
     sleep_for, sleep_until, submit_async,
 };
+
+pub fn create_stream(attach_credentials: bool) -> Result<(Handle, Handle)> {
+    let mut handles = [0; 2];
+
+    result::hel_check(unsafe {
+        hel_sys::helCreateStream(&mut handles[0], &mut handles[1], attach_credentials as _)
+    })
+    .map(|_| unsafe { (Handle::from_raw(handles[0]), Handle::from_raw(handles[1])) })
+}
 
 /// A time value in nanoseconds since boot.
 #[repr(transparent)]

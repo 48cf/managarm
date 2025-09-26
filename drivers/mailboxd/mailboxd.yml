@@ -1,0 +1,4 @@
+name: mailboxd
+exec: /usr/bin/mailboxd
+files:
+  - /usr/bin/mailboxd

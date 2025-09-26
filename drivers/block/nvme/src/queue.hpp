@@ -10,6 +10,11 @@
 #include "command.hpp"
 #include "spec.hpp"
 
+enum class QueueType {
+	admin,
+	io,
+};
+
 struct Queue {
 	Queue(unsigned int index, unsigned int depth) : qid_{index}, depth_{depth} {
 		queuedCmds_.resize(depth);

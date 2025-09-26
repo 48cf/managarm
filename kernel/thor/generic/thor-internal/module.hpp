@@ -10,7 +10,8 @@ namespace thor {
 enum class MfsType {
 	null,
 	directory,
-	regular
+	regular,
+	random
 };
 
 struct MfsNode {

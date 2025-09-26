@@ -104,7 +104,12 @@ impl Handle {
         let mut new_handle = hel_sys::kHelNullHandle as hel_sys::HelHandle;
 
         hel_check(unsafe {
-            hel_sys::helTransferDescriptor(self.handle, universe.handle, hel_sys::kHelTransferDescriptorOut, &mut new_handle)
+            hel_sys::helTransferDescriptor(
+                self.handle,
+                universe.handle,
+                hel_sys::kHelTransferDescriptorOut,
+                &mut new_handle,
+            )
         })?;
 
         Ok(Handle {

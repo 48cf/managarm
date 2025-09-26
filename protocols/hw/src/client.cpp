@@ -10,8 +10,37 @@
 #include <bragi/helpers-all.hpp>
 #include <bragi/helpers-std.hpp>
 #include "protocols/hw/client.hpp"
+#include "protocols/mbus/client.hpp"
 
 namespace protocols::hw {
+
+async::result<void> MailboxChannel::sendMessage(const void *data, size_t length) {
+	managarm::hw::MailboxMessage req;
+	req.set_data({(const uint8_t *)data, (const uint8_t *)data + length});
+
+	auto [offer, sendHead, sendTail] = co_await helix_ng::exchangeMsgs(
+	    _lane, helix_ng::offer(helix_ng::sendBragiHeadTail(req, frg::stl_allocator{}))
+	);
+	HEL_CHECK(offer.error());
+	HEL_CHECK(sendHead.error());
+	HEL_CHECK(sendTail.error());
+}
+
+async::result<void> MailboxChannel::receiveMessage(void *data, size_t length) {
+	managarm::hw::MailboxReceive req;
+	req.set_msg_size(length);
+
+	auto [offer, sendReq, recvBuffer] = co_await helix_ng::exchangeMsgs(
+	    _lane,
+	    helix_ng::offer(
+	        helix_ng::sendBragiHeadOnly(req, frg::stl_allocator{}),
+	        helix_ng::recvBuffer(data, length)
+	    )
+	);
+	HEL_CHECK(offer.error());
+	HEL_CHECK(sendReq.error());
+	HEL_CHECK(recvBuffer.error());
+}
 
 async::result<PciInfo> Device::getPciInfo() {
 	managarm::hw::GetPciInfoRequest req;
@@ -243,6 +272,97 @@ async::result<helix::UniqueDescriptor> Device::installMsi(int index) {
 	assert(resp.error() == managarm::hw::Errors::SUCCESS);
 
 	co_return pull_msi.descriptor();
+}
+
+async::result<std::optional<MailboxChannel>> Device::accessMailbox(uint32_t index) {
+	auto mboxes = co_await getDtProperty("mboxes");
+	if (!mboxes) {
+		co_return std::nullopt;
+	}
+
+	size_t i = 0;
+	size_t offset = 0;
+
+	while (offset < mboxes->size() / sizeof(uint32_t)) {
+		auto phandle = mboxes->asU32(offset);
+		std::optional<mbus_ng::Entity> entity;
+		{
+			auto filter = mbus_ng::EqualsFilter{"dt.phandle", std::format("{:x}", phandle)};
+			auto enumerator = mbus_ng::Instance::global().enumerate(filter);
+			auto [_, events] = (co_await enumerator.nextEvents()).unwrap();
+			if (events.size() != 1) {
+				co_return std::nullopt;
+			}
+
+			entity = co_await mbus_ng::Instance::global().getEntity(events[0].id);
+		}
+
+		size_t mboxCells;
+		{
+			auto lane = (co_await entity->getRemoteLane()).unwrap();
+			auto mboxDevice = protocols::hw::Device(std::move(lane));
+			auto mboxCellsProp = co_await mboxDevice.getDtProperty("#mbox-cells");
+			if (!mboxCellsProp) {
+				co_return std::nullopt;
+			}
+
+			mboxCells = mboxCellsProp->asU32(0);
+		}
+
+		if (i != index) {
+			i++;
+			offset += mboxCells + 1;
+			continue;
+		}
+
+		std::vector<uint32_t> specifier;
+		for (size_t j = 0; j < mboxCells; j++) {
+			specifier.push_back(mboxes->asU32(offset + 1 + j));
+		}
+
+		std::optional<mbus_ng::Entity> mboxEntity;
+		{
+			auto mboxFilter = mbus_ng::Conjunction{{
+				mbus_ng::EqualsFilter{"mbox.phandle", std::format("{:x}", phandle)},
+			}};
+			auto mboxEnumerator = mbus_ng::Instance::global().enumerate(mboxFilter);
+			auto [__, mboxEvents] = (co_await mboxEnumerator.nextEvents()).unwrap();
+			if (mboxEvents.size() != 1) {
+				co_return std::nullopt;
+			}
+
+			mboxEntity = co_await mbus_ng::Instance::global().getEntity(mboxEvents[0].id);
+		}
+
+		auto mboxLane = (co_await mboxEntity->getRemoteLane()).unwrap();
+
+		managarm::hw::AccessMailboxRequest req;
+		req.set_specifier(std::move(specifier));
+
+		auto [offer, sendHead, sendTail, recv, pull] = co_await helix_ng::exchangeMsgs(
+		    mboxLane,
+		    helix_ng::offer(
+		        helix_ng::sendBragiHeadTail(req, frg::stl_allocator{}),
+		        helix_ng::recvInline(),
+				helix_ng::pullDescriptor()
+		    )
+		);
+		HEL_CHECK(offer.error());
+		HEL_CHECK(sendHead.error());
+		HEL_CHECK(sendTail.error());
+		HEL_CHECK(recv.error());
+		HEL_CHECK(pull.error());
+
+		auto resp = bragi::parse_head_only<managarm::hw::AccessMailboxResponse>(recv);
+		recv.reset();
+		co_return MailboxChannel{pull.descriptor(), resp->channel_id()};
+	}
+
+	co_return std::nullopt;
+}
+
+async::result<std::optional<MailboxChannel>> Device::accessMailbox(std::string_view name) {
+	assert(!"Device::accessMailbox(std::string_view name) not implemented");
 }
 
 async::result<void> Device::claimDevice() {

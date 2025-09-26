@@ -20,6 +20,7 @@ enum class InterruptMode {
 enum class ControllerType {
 	PciExpress,
 	FabricsTcp,
+	AppleAns2,
 };
 
 struct Controller {

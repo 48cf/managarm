@@ -18,6 +18,22 @@ constexpr size_t kAicTimerGuestVirt = 3;
 constexpr size_t kAicCpuPmuE = 4;
 constexpr size_t kAicCpuPmuP = 5;
 
+namespace aic {
+
+constexpr arch::bit_register<uint32_t> info{0x4};
+
+namespace regs {
+
+namespace info {
+
+constexpr arch::field<uint32_t, uint32_t> nrIrq{0, 16};
+
+} // namespace info
+
+} // namespace regs
+
+} // namespace aic
+
 } // namespace
 
 namespace thor {
@@ -28,8 +44,8 @@ struct AicIrqController : IrqController {
 	struct Pin : IrqPin {
 		Pin(AicIrqController *ic, uint32_t irq, frg::string<KernelAlloc> name)
 		: IrqPin{std::move(name)},
-		  ic_(ic),
-		  irq_(irq) {
+		  _aic{ic},
+		  _irq{irq} {
 			configure({TriggerMode::level, Polarity::high});
 		}
 
@@ -40,26 +56,53 @@ struct AicIrqController : IrqController {
 		void endOfService() override;
 
 	private:
-		AicIrqController *ic_;
-		uint32_t irq_;
+		void _setMaskState(bool masked);
 
-		bool isMasked_{false};
+	private:
+		AicIrqController *_aic;
+		uint32_t _irq;
+
+		bool _isMasked{false};
 	};
 
-	AicIrqController(uintptr_t base, size_t size) : base_(base) {
+	AicIrqController(uintptr_t base, size_t size) : _base(base) {
 		auto ptr = KernelVirtualMemory::global().allocate(size);
 		for (size_t i = 0; i < size; i += kPageSize) {
 			KernelPageSpace::global().mapSingle4k(
 			    (VirtualAddr)ptr + i, base + i, page_access::write, CachingMode::mmioNonPosted
 			);
 		}
-		space_ = arch::mem_space{ptr};
+		_mmio = arch::mem_space{ptr};
+
+		auto info = _mmio.load(aic::info);
+
+		_nrIrq = info & aic::regs::info::nrIrq;
+		_maxIrq = 0x400;
+		_nrDie = 1;
+		_maxDie = 1;
+		_dieStride = sizeof(uint32_t) * _maxIrq;
+
+		size_t startOffset = 0x3000;
+		size_t offset = startOffset;
+		offset += sizeof(uint32_t) * _maxIrq; // TARGET_CPU
+
+		_swSet = offset;
+		offset += sizeof(uint32_t) * (_maxIrq >> 5); // SW_SET
+		_swClr = offset;
+		offset += sizeof(uint32_t) * (_maxIrq >> 5); // SW_CLR
+		_maskSet = offset;
+		offset += sizeof(uint32_t) * (_maxIrq >> 5); // MASK_SET
+		_maskClr = offset;
+		offset += sizeof(uint32_t) * (_maxIrq >> 5); // MASK_CLR
+		offset += sizeof(uint32_t) * (_maxIrq >> 5); // HW_STATE
+
+		_dieStride = offset - startOffset;
 
 		auto name = frg::string<KernelAlloc>{*kernelAlloc, "aic@0x"};
 		name += frg::to_allocated_string(*kernelAlloc, base, 16);
 
 		for (uint32_t i = 0; i < 6; i++) {
-			fiqs_[i] = frg::construct<Pin>(
+			_fiqs[i] = frg::construct<Pin>(
 			    *kernelAlloc,
 			    this,
 			    i,
@@ -82,9 +125,20 @@ struct AicIrqController : IrqController {
 	IrqPin *handleFiq() override;
 
 private:
-	uintptr_t base_;
-	arch::mem_space space_;
-	IrqPin *fiqs_[6];
+	uintptr_t _base;
+	arch::mem_space _mmio;
+
+	IrqPin *_fiqs[6];
+
+	size_t _nrIrq;
+	size_t _maxIrq;
+	size_t _nrDie;
+	size_t _maxDie;
+	size_t _dieStride;
+	size_t _swSet;
+	size_t _swClr;
+	size_t _maskSet;
+	size_t _maskClr;
 };
 
 IrqStrategy AicIrqController::Pin::program(TriggerMode mode, Polarity polarity) {
@@ -106,27 +160,64 @@ IrqStrategy AicIrqController::Pin::program(TriggerMode mode, Polarity polarity) 
 #define AIC_EVENT_IPI_OTHER 1
 #define AIC_EVENT_IPI_SELF 2
 
-void AicIrqController::Pin::mask() {
-	isMasked_ = true;
+#define AIC_SW_SET 0x4000
+#define AIC_SW_CLR 0x4080
+#define AIC_MASK_SET 0x4100
+#define AIC_MASK_CLR 0x4180
 
-	// ...
+/*
+
+static void aic_irq_mask(struct irq_data *d)
+{
+    irq_hw_number_t hwirq = irqd_to_hwirq(d);
+    struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
+
+    u32 off = AIC_HWIRQ_DIE(hwirq) * ic->info.die_stride;
+    u32 irq = AIC_HWIRQ_IRQ(hwirq);
+
+    aic_ic_write(ic, ic->info.mask_set + off + MASK_REG(irq), MASK_BIT(irq));
+}
+
+static void aic_irq_unmask(struct irq_data *d)
+{
+    irq_hw_number_t hwirq = irqd_to_hwirq(d);
+    struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
+
+    u32 off = AIC_HWIRQ_DIE(hwirq) * ic->info.die_stride;
+    u32 irq = AIC_HWIRQ_IRQ(hwirq);
+
+    aic_ic_write(ic, ic->info.mask_clr + off + MASK_REG(irq), MASK_BI3(irq));
+}
+
+*/
+
+void AicIrqController::Pin::mask() {
+	_isMasked = true;
+	_setMaskState(true);
 }
 
 void AicIrqController::Pin::unmask() {
-	isMasked_ = false;
-
-	// ...
+	_isMasked = false;
+	_setMaskState(false);
 }
 
 void AicIrqController::Pin::endOfService() {
-	if (!isMasked_) {
+	if (!_isMasked) {
 		unmask();
 	}
 }
 
+void AicIrqController::Pin::_setMaskState(bool masked) {
+	arch::scalar_store<uint32_t>(
+	    _aic->_mmio,
+	    (masked ? _aic->_maskSet : _aic->_maskClr) + (_irq >> 5) * sizeof(uint32_t),
+	    1 << (_irq & 0b11111)
+	);
+}
+
 void AicIrqController::sendIpi(uint32_t cpuId, uint8_t id) {
 	assert(id == 0);
-	arch::scalar_store<uint32_t>(space_, AIC_IPI_SEND, 1 << cpuId);
+	arch::scalar_store<uint32_t>(_mmio, AIC_IPI_SEND, 1 << cpuId);
 }
 
 void AicIrqController::sendIpiToOthers(uint8_t id) {
@@ -135,7 +226,7 @@ void AicIrqController::sendIpiToOthers(uint8_t id) {
 }
 
 IrqController::CpuIrq AicIrqController::getIrq() {
-	auto event = arch::scalar_load<uint32_t>(space_, AIC_EVENT);
+	auto event = arch::scalar_load<uint32_t>(_mmio, AIC_EVENT);
 
 	auto irq = event & 0xffff;
 	auto type = (event >> 16) & 0xffff;
@@ -157,7 +248,7 @@ IrqPin *AicIrqController::setupIrq(uint32_t irq, TriggerMode trigger) {
 	    this,
 	    irq,
 	    frg::string<KernelAlloc>{*kernelAlloc, "aic@0x"}
-	        + frg::to_allocated_string(*kernelAlloc, base_, 16)
+	        + frg::to_allocated_string(*kernelAlloc, _base, 16)
 	        + frg::string<KernelAlloc>{*kernelAlloc, ":irq"}
 	        + frg::to_allocated_string(*kernelAlloc, irq)
 	);
@@ -176,7 +267,7 @@ IrqPin *AicIrqController::resolveDtIrq(dtb::Cells irq) {
 
 	if (type == kAicFiq) {
 		assert(number < 6);
-		return fiqs_[number];
+		return _fiqs[number];
 	}
 
 	return setupIrq(number, TriggerMode::edge);
@@ -198,11 +289,11 @@ IrqPin *AicIrqController::handleFiq() {
 	};
 
 	if (isTimerFiring(cntp_ctl_el0)) {
-		return fiqs_[kAicTimerHvPhys];
+		return _fiqs[kAicTimerHvPhys];
 	}
 
 	if (isTimerFiring(cntv_ctl_el0)) {
-		return fiqs_[kAicTimerHvVirt];
+		return _fiqs[kAicTimerHvVirt];
 	}
 
 	if (isKernelInEl2()) {
@@ -218,11 +309,11 @@ IrqPin *AicIrqController::handleFiq() {
 #define VM_TMR_FIQ_ENABLE_P (1 << 1)
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) && isTimerFiring(cntp_ctl_el02)) {
-			return fiqs_[kAicTimerGuestPhys];
+			return _fiqs[kAicTimerGuestPhys];
 		}
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) && isTimerFiring(cntv_ctl_el02)) {
-			return fiqs_[kAicTimerGuestVirt];
+			return _fiqs[kAicTimerGuestVirt];
 		}
 	}
 
@@ -230,7 +321,7 @@ IrqPin *AicIrqController::handleFiq() {
 	asm volatile("mrs %0, s3_1_c15_c0_0" : "=r"(pmcr0_el1)); // IMP_APL_PMCR0_EL1
 
 	if (pmcr0_el1 & (1 << 11)) {
-		return fiqs_[kAicCpuPmuE];
+		return _fiqs[kAicCpuPmuE];
 	}
 
 	return nullptr;

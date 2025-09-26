@@ -7,4 +7,4 @@ pub use device::Device;
 pub use error::Error;
 pub use result::Result;
 
-bragi::include_binding!(mod bindings = "hw.rs");
+bragi::include_binding!(pub mod bindings = "hw.rs");

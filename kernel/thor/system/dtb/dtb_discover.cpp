@@ -85,6 +85,8 @@ struct MbusNode final : private KernelBusObject {
 			properties.decStringProperty("drvcore.mbus-parent", parent->mbusId, 1);
 		}
 
+		properties.hexStringProperty("dt.phandle", node->phandle(), 0);
+
 		for(auto &compatible : node->compatible()) {
 			frg::string<KernelAlloc> prop{*kernelAlloc, "dt.compatible="};
 			prop += compatible;

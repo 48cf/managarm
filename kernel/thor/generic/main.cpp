@@ -430,7 +430,11 @@ void handlePageFault(FaultImageAccessor image, uintptr_t address, Word errorCode
 	}
 
 	smarter::borrowed_ptr<Thread> this_thread = getCurrentThread();
-	assert(this_thread.get());
+	if (!this_thread.get()) {
+		logFault();
+		panicLogger() << "thor: Page fault without a current thread, at " << (void *)address
+		              << frg::endlog;
+	}
 
 	auto address_space = this_thread->getAddressSpace();
 	assert(!(errorCode & kPfBadTable));

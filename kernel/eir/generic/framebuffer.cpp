@@ -3,6 +3,7 @@
 #include <eir-internal/debug.hpp>
 #include <eir-internal/framebuffer.hpp>
 #include <eir-internal/generic.hpp>
+#include <frg/manual_box.hpp>
 #include <render-text.hpp>
 
 namespace eir {
@@ -18,6 +19,10 @@ frg::optional<EirFramebuffer> &accessGlobalFb() {
 }
 
 struct FbLogHandler : LogHandler {
+	FbLogHandler(TextRenderer renderer, int fontScale)
+	: textRenderer_{renderer},
+	  fontScale_{fontScale} {}
+
 	// Check whether eir can log to this framebuffer.
 	static bool suitable(const EirFramebuffer &fb) {
 		if (fb.fbBpp != 32)
@@ -34,17 +39,16 @@ struct FbLogHandler : LogHandler {
 			if (c == '\n') {
 				outputX_ = 0;
 				outputY_++;
-			} else if (outputX_ >= fb.fbWidth / fontWidth) {
+			} else if (outputX_ >= fb.fbWidth / (fontWidth * fontScale_)) {
 				outputX_ = 0;
 				outputY_++;
-			} else if (outputY_ >= fb.fbHeight / fontHeight) {
+			} else if (outputY_ >= fb.fbHeight / (fontHeight * fontScale_)) {
 				// TODO: Scroll.
 			} else {
-				renderChars(
-				    physToVirt<void>(fb.fbAddress),
-				    fb.fbPitch / sizeof(uint32_t),
+				textRenderer_.renderChars(
 				    outputX_,
 				    outputY_,
+				    fontScale_,
 				    &c,
 				    1,
 				    15,
@@ -60,11 +64,13 @@ struct FbLogHandler : LogHandler {
 	}
 
 private:
+	TextRenderer textRenderer_;
 	unsigned int outputX_{0};
 	unsigned int outputY_{0};
+	int fontScale_{1};
 };
 
-constinit FbLogHandler fbLogHandler;
+constinit frg::manual_box<FbLogHandler> fbLogHandler;
 
 } // anonymous namespace
 
@@ -77,7 +83,23 @@ void initFramebuffer(const EirFramebuffer &fb) {
 	globalFb = fb;
 
 	if (FbLogHandler::suitable(fb)) {
-		enableLogHandler(&fbLogHandler);
+		auto [redMask, redShift, greenMask, greenShift, blueMask, blueShift] =
+		    getFramebufferComponents(fb.fbType);
+
+		TextRenderer renderer{
+		    reinterpret_cast<volatile uint32_t *>(fb.fbAddress),
+		    fb.fbPitch / sizeof(uint32_t),
+		    redMask,
+		    redShift,
+		    greenMask,
+		    greenShift,
+		    blueMask,
+		    blueShift
+		};
+
+		fbLogHandler.initialize(renderer, getFramebufferTextScale(fb.fbWidth, fb.fbHeight));
+
+		enableLogHandler(fbLogHandler.get());
 	} else {
 		infoLogger() << "eir: Framebuffer is not suitable for logging" << frg::endlog;
 	}

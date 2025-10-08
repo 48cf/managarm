@@ -290,7 +290,7 @@ static initgraph::Task setupFramebuffer{
 	    fb.fbHeight = actualH;
 	    fb.fbPitch = pitch;
 	    fb.fbBpp = 32;
-	    fb.fbType = 0;
+	    fb.fbType = EirFramebufferType::x8r8g8b8;
 	    initFramebuffer(fb);
 
 	    infoLogger() << "Framebuffer pointer: " << ptr << frg::endlog;

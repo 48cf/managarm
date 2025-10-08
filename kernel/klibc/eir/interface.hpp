@@ -10,6 +10,24 @@ static const uint32_t eirDebugSerial = 1;
 static const uint32_t eirDebugBochs = 2;
 static const uint32_t eirDebugKernelProfile = 16;
 
+enum struct EirFramebufferType : uint32_t {
+	x8r8g8b8,
+	x8b8g8r8,
+	x2r10g10b10,
+};
+
+// Returns an array of {redMask, redShift, greenMask, greenShift, blueMask, blueShift}.
+inline std::array<uint8_t, 6> getFramebufferComponents(EirFramebufferType type) {
+	switch (type) {
+		case EirFramebufferType::x8r8g8b8:
+			return {8, 16, 8, 8, 8, 0};
+		case EirFramebufferType::x8b8g8r8:
+			return {8, 0, 8, 8, 8, 16};
+		case EirFramebufferType::x2r10g10b10:
+			return {10, 20, 10, 10, 10, 0};
+	}
+}
+
 typedef uint64_t EirPtr;
 typedef uint64_t EirSize;
 
@@ -35,7 +53,7 @@ struct EirFramebuffer {
 	EirSize fbWidth;
 	EirSize fbHeight;
 	EirSize fbBpp;
-	EirSize fbType;
+	EirFramebufferType fbType;
 };
 
 struct EirInfo {

@@ -13,6 +13,17 @@
 
 namespace thor {
 
+namespace {
+
+inline uint32_t fourcc(char a, char b, char c, char d) {
+	return static_cast<uint32_t>(a)
+		| (static_cast<uint32_t>(b) << 8)
+		| (static_cast<uint32_t>(c) << 16)
+		| (static_cast<uint32_t>(d) << 24);
+}
+
+} // namespace
+
 // ------------------------------------------------------------------------
 // window handling
 // ------------------------------------------------------------------------
@@ -21,15 +32,40 @@ constexpr size_t fontHeight = 16;
 constexpr size_t fontWidth = 8;
 
 struct FbDisplay final : TextDisplay {
-	FbDisplay(void *ptr, unsigned int width, unsigned int height, size_t pitch)
-	: _width{width}, _height{height}, _pitch{pitch / sizeof(uint32_t)} {
+	FbDisplay(void *ptr, unsigned int width, unsigned int height, size_t pitch,
+			uint8_t redMask, uint8_t redShift, uint8_t greenMask, uint8_t greenShift,
+			uint8_t blueMask, uint8_t blueShift)
+	: _width{width},
+	  _height{height},
+	  _pitch{pitch / sizeof(uint32_t)},
+	  _textRenderer{
+	      reinterpret_cast<volatile uint32_t *>(ptr),
+	      pitch / sizeof(uint32_t),
+	      redMask,
+	      redShift,
+	      greenMask,
+	      greenShift,
+	      blueMask,
+	      blueShift
+	  },
+	  _fontScale{getFramebufferTextScale(width, height)} {
 		assert(!(pitch % sizeof(uint32_t)));
 		setWindow(ptr);
-		_clearScreen(defaultBg);
+		_clearScreen(_textRenderer.defaultBgColor());
 	}
 
 	void setWindow(void *ptr) {
 		_window = reinterpret_cast<uint32_t *>(ptr);
+		_textRenderer = {
+		    reinterpret_cast<volatile uint32_t *>(ptr),
+		    _textRenderer.pitch(),
+		    _textRenderer.redMask(),
+		    _textRenderer.redShift(),
+		    _textRenderer.greenMask(),
+		    _textRenderer.greenShift(),
+		    _textRenderer.blueMask(),
+		    _textRenderer.blueShift()
+		};
 	}
 
 	size_t getWidth() override;
@@ -46,31 +82,33 @@ private:
 	unsigned int _width;
 	unsigned int _height;
 	size_t _pitch;
+	TextRenderer _textRenderer;
+	int _fontScale{1};
 };
 
 size_t FbDisplay::getWidth() {
-	return _width / fontWidth;
+	return _width / (fontWidth * _fontScale);
 }
 
 size_t FbDisplay::getHeight() {
-	return _height / fontHeight;
+	return _height / (fontHeight * _fontScale);
 }
 
 void FbDisplay::setChars(unsigned int x, unsigned int y,
 		const char *c, int count, int fg, int bg) {
-	renderChars((void *)_window, _pitch, x, y, c, count, fg, bg,
+	_textRenderer.renderChars(x, y, _fontScale, c, count, fg, bg,
 			std::integral_constant<int, fontWidth>{},
 			std::integral_constant<int, fontHeight>{});
 }
 
 void FbDisplay::setBlanks(unsigned int x, unsigned int y, int count, int bg) {
-	auto bg_rgb = (bg < 0) ? defaultBg : rgbColor[bg];
+	auto bg_rgb = (bg < 0) ? _textRenderer.defaultBgColor() : _textRenderer.rgbColor(bg);
 
-	auto dest_line = _window + y * fontHeight * _pitch + x * fontWidth;
-	for(size_t i = 0; i < fontHeight; i++) {
+	auto dest_line = _window + y * (fontHeight * _fontScale) * _pitch + x * (fontWidth * _fontScale);
+	for(size_t i = 0; i < fontHeight * _fontScale; i++) {
 		auto dest = dest_line;
 		for(int k = 0; k < count; k++) {
-			for(size_t j = 0; j < fontWidth; j++)
+			for(size_t j = 0; j < fontWidth * _fontScale; j++)
 				*dest++ = bg_rgb;
 		}
 		dest_line += _pitch;
@@ -94,7 +132,7 @@ namespace {
 }
 
 void initializeBootFb(uint64_t address, uint64_t pitch, uint64_t width,
-		uint64_t height, uint64_t bpp, uint64_t type, void *early_window) {
+		uint64_t height, uint64_t bpp, EirFramebufferType type, void *early_window) {
 	bootInfo.initialize();
 	auto fb_info = bootInfo.get();
 	fb_info->address = address;
@@ -102,11 +140,34 @@ void initializeBootFb(uint64_t address, uint64_t pitch, uint64_t width,
 	fb_info->width = width;
 	fb_info->height = height;
 	fb_info->bpp = bpp;
-	fb_info->type = type;
+
+	std::tie(
+	    fb_info->redMask,
+	    fb_info->redShift,
+	    fb_info->greenMask,
+	    fb_info->greenShift,
+	    fb_info->blueMask,
+	    fb_info->blueShift
+	) = getFramebufferComponents(type);
+
+	switch (type) {
+		case EirFramebufferType::x8r8g8b8:
+			fb_info->type = fourcc('X', 'R', '2', '4');
+			break;
+		case EirFramebufferType::x8b8g8r8:
+			fb_info->type = fourcc('X', 'B', '2', '4');
+			break;
+		case EirFramebufferType::x2r10g10b10:
+			fb_info->type = fourcc('X', 'R', '3', '0');
+			break;
+	}
 
 	// Initialize the framebuffer with a lower-half window.
 	bootDisplay.initialize(early_window,
-			fb_info->width, fb_info->height, fb_info->pitch);
+			fb_info->width, fb_info->height, fb_info->pitch,
+			fb_info->redMask, fb_info->redShift,
+			fb_info->greenMask, fb_info->greenShift,
+			fb_info->blueMask, fb_info->blueShift);
 	bootScreen.initialize(bootDisplay.get());
 
 	enableLogHandler(bootScreen.get());

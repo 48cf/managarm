@@ -8,6 +8,7 @@
 #include <eir-internal/cmdline.hpp>
 #include <eir-internal/debug.hpp>
 #include <eir-internal/dtb/discovery.hpp>
+#include <eir-internal/framebuffer.hpp>
 #include <eir-internal/generic.hpp>
 #include <eir-internal/main.hpp>
 #include <eir-internal/uart/uart.hpp>
@@ -130,6 +131,89 @@ void discoverMemoryFromDtb() {
 		else
 			eir::panicLogger() << "Invalid linux,initrd-end size" << frg::endlog;
 	}
+
+	chosenNode.discoverSubnodes(
+	    [](auto node) {
+		    auto compatible = node.findProperty("compatible");
+		    if (!compatible.has_value()) {
+			    return false;
+		    }
+
+		    for (size_t i = 0;; i++) {
+			    auto prop = compatible->asString(i);
+			    if (!prop.has_value()) {
+				    break;
+			    }
+
+			    if (prop.value() == "simple-framebuffer") {
+				    return true;
+			    }
+		    }
+
+		    return false;
+	    },
+	    [&](auto fbNode) {
+		    auto reg = fbNode.findProperty("reg");
+		    auto width = fbNode.findProperty("width");
+		    auto height = fbNode.findProperty("height");
+		    auto stride = fbNode.findProperty("stride");
+		    auto format = fbNode.findProperty("format");
+
+		    if (!reg) {
+			    eir::infoLogger() << "simple-framebuffer node has no \"reg\" property"
+			                      << frg::endlog;
+			    return;
+		    }
+		    if (!width) {
+			    eir::infoLogger() << "simple-framebuffer node has no \"width\" property"
+			                      << frg::endlog;
+			    return;
+		    }
+		    if (!height) {
+			    eir::infoLogger() << "simple-framebuffer node has no \"height\" property"
+			                      << frg::endlog;
+			    return;
+		    }
+		    if (!stride) {
+			    eir::infoLogger() << "simple-framebuffer node has no \"stride\" property"
+			                      << frg::endlog;
+			    return;
+		    }
+		    if (!format) {
+			    eir::infoLogger() << "simple-framebuffer node has no \"format\" property"
+			                      << frg::endlog;
+			    return;
+		    }
+
+		    auto fmt = format->asString();
+		    if (!fmt) {
+			    eir::infoLogger() << "simple-framebuffer node has invalid \"format\" property"
+			                      << frg::endlog;
+			    return;
+		    }
+
+		    EirFramebuffer fb;
+		    fb.fbAddress = reg->asU64();
+		    fb.fbPitch = stride->asU32();
+		    fb.fbWidth = width->asU32();
+		    fb.fbHeight = height->asU32();
+		    fb.fbBpp = 32;
+
+		    if (*fmt == "x8r8g8b8") {
+			    fb.fbType = EirFramebufferType::x8r8g8b8;
+		    } else if (*fmt == "x8b8g8r8") {
+			    fb.fbType = EirFramebufferType::x8b8g8r8;
+		    } else if (*fmt == "x2r10g10b10") {
+			    fb.fbType = EirFramebufferType::x2r10g10b10;
+		    } else {
+			    eir::infoLogger() << "simple-framebuffer node has unsupported \"format\" property: "
+			                      << *fmt << frg::endlog;
+			    return;
+		    }
+
+		    initFramebuffer(fb);
+	    }
+	);
 
 	assert(initrdStart && initrdEnd);
 

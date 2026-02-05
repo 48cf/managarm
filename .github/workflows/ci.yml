@@ -305,8 +305,6 @@ jobs:
           - cache-arch
           # - build-package
         runs-on: ubuntu-24.04
-        container:
-            options: --privileged
         steps:
           - name: Permit unprivileged user namespaces
             run: |
@@ -364,9 +362,8 @@ jobs:
                 path: src/managarm/
                 fetch-depth: 0
           - name: Run QEMU in container
-            uses: docker://debian:stable-slim
-            with:
-                args: |
+            run: |
+                docker run --rm --privileged debian:stable-slim bash -c "
                     set -x
 
                     # Fix KVM node permissions
@@ -378,6 +375,7 @@ jobs:
 
                     # Run QEMU
                     timeout 5 qemu-system-x86_64 -enable-kvm -cpu host -serial stdio || true
+                "
 
           # - name: Set up xbstrap and generate image
           #   run: |

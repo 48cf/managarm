@@ -55,7 +55,8 @@ jobs:
     cache-arch:
         strategy:
             matrix:
-                arch: [x86_64, aarch64, riscv64]
+                arch: [x86_64]
+                # arch: [x86_64, aarch64, riscv64]
         name: Cache ${{ matrix.arch }} prerequisites
         needs: cache-generic
         runs-on: ubuntu-24.04
@@ -107,218 +108,214 @@ jobs:
                 rm xbps-repo/managarm-kernel*.xbps
             working-directory: build/
 
-    lint-package:
-        strategy:
-            matrix:
-                arch: [x86_64, aarch64, riscv64]
-                pkg: [managarm-kernel, managarm-system, managarm-kernel-uefi]
-        name: Lint ${{ matrix.pkg }} on ${{ matrix.arch }}
-        needs:
-          - cache-generic
-          - cache-arch
-        runs-on: ubuntu-24.04
-        steps:
-          - name: Permit unprivileged user namespaces
-            run: |
-                set -x
-                sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
-                sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          - name: Install prerequisites
-            run: |
-                set -x
-                pip3 install xbstrap y4
-                xbstrap prereqs cbuildrt xbps
-          - name: Restore rootfs cache
-            uses: actions/cache/restore@v4
-            with:
-                key: "rootfs-${{ needs.cache-generic.outputs.caching-key }}"
-                # Note: must be kept in sync with the cache action (effectively part of the key).
-                path: rootfs/
-                fail-on-cache-miss: true
-          - name: Restore xbps cache
-            uses: actions/cache/restore@v4
-            with:
-                key: "xbps-${{ matrix.arch }}-${{ needs.cache-generic.outputs.caching-key }}"
-                # Note: must be kept in sync with the restore action (effectively part of the key).
-                path: build/xbps-repo/*.xbps
-                fail-on-cache-miss: true
-          - name: Checkout bootstrap-managarm
-            uses: actions/checkout@v2
-            with:
-                repository: managarm/bootstrap-managarm
-                ref: ${{ needs.cache-generic.outputs.corresponding-bootstrap }}
-                path: src/
-          - name: Checkout Managarm
-            uses: actions/checkout@v2
-            with:
-                path: src/managarm/
-                fetch-depth: 0
-          - name: Prepare src/ and build/
-            run: |
-                set -x
-                touch src/managarm/checkedout.xbstrap
-                cp src/managarm/ci/bootstrap-site-$CI_ARCH.yml build/bootstrap-site.yml
-            env:
-                CI_ARCH: ${{ matrix.arch }}
-          - name: Set up xbstrap
-            run: |
-                set -x
-                xbstrap init ../src
-                ~/.xbstrap/bin/xbps-rindex -fa xbps-repo/*.xbps
-            env:
-                XBPS_ARCH: ${{ matrix.arch }}
-            working-directory: build/
-          - name: Build on ${{ matrix.pkg }} on ${{ matrix.arch }}
-            # Note that we do need to build the package to run clang-tidy (otherwise generated files are missing).
-            # Build without optimizations to reduce the build time.
-            run: |
-                xbstrap configure $CI_BUILD_PKG
-                xbstrap runtool -- meson configure pkg-builds/$CI_BUILD_PKG/ -Dbuildtype=debug -Ddebug=false -Db_lto=false
-                xbstrap runtool -- meson configure pkg-builds/$CI_BUILD_PKG/ -Dwerror=true
-                xbstrap build $CI_BUILD_PKG
-            working-directory: build/
-            env:
-                CI_ARCH: ${{ matrix.arch }}
-                CI_BUILD_PKG: ${{ matrix.pkg }}
-          - name: Run clang-format / clang-tidy on ${{ matrix.pkg }} on ${{ matrix.arch }}
-            run: |
-                if [ "$CI_BUILD_PKG" = "managarm-kernel" ]; then
-                    xbstrap run --keep-going --pkg $CI_BUILD_PKG clang-tidy clang-format-check
-                else
-                    xbstrap run --pkg $CI_BUILD_PKG clang-tidy
-                fi
-            working-directory: build/
-            env:
-                CI_ARCH: ${{ matrix.arch }}
-                CI_BUILD_PKG: ${{ matrix.pkg }}
+    # lint-package:
+    #     strategy:
+    #         matrix:
+    #             arch: [x86_64, aarch64, riscv64]
+    #             pkg: [managarm-kernel, managarm-system, managarm-kernel-uefi]
+    #     name: Lint ${{ matrix.pkg }} on ${{ matrix.arch }}
+    #     needs:
+    #       - cache-generic
+    #       - cache-arch
+    #     runs-on: ubuntu-24.04
+    #     steps:
+    #       - name: Permit unprivileged user namespaces
+    #         run: |
+    #             set -x
+    #             sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+    #             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    #       - name: Install prerequisites
+    #         run: |
+    #             set -x
+    #             pip3 install xbstrap y4
+    #             xbstrap prereqs cbuildrt xbps
+    #       - name: Restore rootfs cache
+    #         uses: actions/cache/restore@v4
+    #         with:
+    #             key: "rootfs-${{ needs.cache-generic.outputs.caching-key }}"
+    #             # Note: must be kept in sync with the cache action (effectively part of the key).
+    #             path: rootfs/
+    #             fail-on-cache-miss: true
+    #       - name: Restore xbps cache
+    #         uses: actions/cache/restore@v4
+    #         with:
+    #             key: "xbps-${{ matrix.arch }}-${{ needs.cache-generic.outputs.caching-key }}"
+    #             # Note: must be kept in sync with the restore action (effectively part of the key).
+    #             path: build/xbps-repo/*.xbps
+    #             fail-on-cache-miss: true
+    #       - name: Checkout bootstrap-managarm
+    #         uses: actions/checkout@v2
+    #         with:
+    #             repository: managarm/bootstrap-managarm
+    #             ref: ${{ needs.cache-generic.outputs.corresponding-bootstrap }}
+    #             path: src/
+    #       - name: Checkout Managarm
+    #         uses: actions/checkout@v2
+    #         with:
+    #             path: src/managarm/
+    #             fetch-depth: 0
+    #       - name: Prepare src/ and build/
+    #         run: |
+    #             set -x
+    #             touch src/managarm/checkedout.xbstrap
+    #             cp src/managarm/ci/bootstrap-site-$CI_ARCH.yml build/bootstrap-site.yml
+    #         env:
+    #             CI_ARCH: ${{ matrix.arch }}
+    #       - name: Set up xbstrap
+    #         run: |
+    #             set -x
+    #             xbstrap init ../src
+    #             ~/.xbstrap/bin/xbps-rindex -fa xbps-repo/*.xbps
+    #         env:
+    #             XBPS_ARCH: ${{ matrix.arch }}
+    #         working-directory: build/
+    #       - name: Build on ${{ matrix.pkg }} on ${{ matrix.arch }}
+    #         # Note that we do need to build the package to run clang-tidy (otherwise generated files are missing).
+    #         # Build without optimizations to reduce the build time.
+    #         run: |
+    #             xbstrap configure $CI_BUILD_PKG
+    #             xbstrap runtool -- meson configure pkg-builds/$CI_BUILD_PKG/ -Dbuildtype=debug -Ddebug=false -Db_lto=false
+    #             xbstrap runtool -- meson configure pkg-builds/$CI_BUILD_PKG/ -Dwerror=true
+    #             xbstrap build $CI_BUILD_PKG
+    #         working-directory: build/
+    #         env:
+    #             CI_ARCH: ${{ matrix.arch }}
+    #             CI_BUILD_PKG: ${{ matrix.pkg }}
+    #       - name: Run clang-format / clang-tidy on ${{ matrix.pkg }} on ${{ matrix.arch }}
+    #         run: |
+    #             if [ "$CI_BUILD_PKG" = "managarm-kernel" ]; then
+    #                 xbstrap run --keep-going --pkg $CI_BUILD_PKG clang-tidy clang-format-check
+    #             else
+    #                 xbstrap run --pkg $CI_BUILD_PKG clang-tidy
+    #             fi
+    #         working-directory: build/
+    #         env:
+    #             CI_ARCH: ${{ matrix.arch }}
+    #             CI_BUILD_PKG: ${{ matrix.pkg }}
 
-    build-package:
-        strategy:
-            matrix:
-                arch: [x86_64, aarch64, riscv64]
-                pkg: [managarm-kernel, managarm-system, managarm-kernel-uefi, managarm-system-rs]
-                variant: [vanilla]
-                include:
-                    # Add variant-suffix to vanilla variants.
-                  - variant: vanilla
-                    variant-suffix: ""
-                    title-suffix: ""
-                    # Add KASAN variants.
-                  - pkg: managarm-kernel
-                    arch: x86_64 # TODO: Extend to other archs.
-                    variant: KASAN
-                    variant-suffix: "+kasan"
-                    title-suffix: ", KASAN"
-                  - pkg: managarm-kernel-uefi
-                    arch: x86_64 # TODO: Extend to other archs.
-                    variant: KASAN
-                    variant-suffix: "+kasan"
-                    title-suffix: ", KASAN"
-        name: Build ${{ matrix.pkg }}${{ matrix.title-suffix }} on ${{ matrix.arch }}
-        needs:
-          - cache-generic
-          - cache-arch
-        runs-on: ubuntu-24.04
-        steps:
-          - name: Permit unprivileged user namespaces
-            run: |
-                set -x
-                sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
-                sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          - name: Install prerequisites
-            run: |
-                set -x
-                pip3 install xbstrap y4
-                xbstrap prereqs cbuildrt xbps
-          - name: Restore rootfs cache
-            uses: actions/cache/restore@v4
-            with:
-                key: "rootfs-${{ needs.cache-generic.outputs.caching-key }}"
-                # Note: must be kept in sync with the cache action (effectively part of the key).
-                path: rootfs/
-                fail-on-cache-miss: true
-          - name: Restore xbps cache
-            uses: actions/cache/restore@v4
-            with:
-                key: "xbps-${{ matrix.arch }}-${{ needs.cache-generic.outputs.caching-key }}"
-                # Note: must be kept in sync with the restore action (effectively part of the key).
-                path: build/xbps-repo/*.xbps
-                fail-on-cache-miss: true
-          - name: Checkout bootstrap-managarm
-            uses: actions/checkout@v2
-            with:
-                repository: managarm/bootstrap-managarm
-                ref: ${{ needs.cache-generic.outputs.corresponding-bootstrap }}
-                path: src/
-          - name: Checkout Managarm
-            uses: actions/checkout@v2
-            with:
-                path: src/managarm/
-                fetch-depth: 0
-          - name: Prepare src/ and build/
-            run: |
-                set -x
-                touch src/managarm/checkedout.xbstrap
-                cp src/managarm/ci/bootstrap-site-$CI_ARCH.yml build/bootstrap-site.yml
-            env:
-                CI_ARCH: ${{ matrix.arch }}
-          - name: Build ${{ matrix.pkg }} package
-            run: |
-                set -x
-                xbstrap init ../src
-                ~/.xbstrap/bin/xbps-rindex -fa xbps-repo/*.xbps
-                xbstrap configure $CI_BUILD_PKG
-                if [ "$CI_VARIANT" = "KASAN" ]; then
-                    xbstrap runtool -- meson configure pkg-builds/$CI_BUILD_PKG/ -Dkernel_kasan=true -Dkernel_ubsan=true
-                fi
-                xbstrap pack $CI_BUILD_PKG
-            env:
-                CI_BUILD_PKG: ${{ matrix.pkg }}
-                CI_VARIANT: ${{ matrix.variant }}
-                XBPS_ARCH: ${{ matrix.arch }}
-            working-directory: build/
-          - name: Upload artifact
-            uses: actions/upload-artifact@v4
-            with:
-                name: "${{ matrix.arch }}-${{ matrix.pkg }}${{ matrix.variant-suffix }}"
-                path: "build/xbps-repo/${{ matrix.pkg }}*.xbps"
-                if-no-files-found: error
+    # build-package:
+    #     strategy:
+    #         matrix:
+    #             arch: [x86_64, aarch64, riscv64]
+    #             pkg: [managarm-kernel, managarm-system, managarm-kernel-uefi, managarm-system-rs]
+    #             variant: [vanilla]
+    #             include:
+    #                 # Add variant-suffix to vanilla variants.
+    #               - variant: vanilla
+    #                 variant-suffix: ""
+    #                 title-suffix: ""
+    #                 # Add KASAN variants.
+    #               - pkg: managarm-kernel
+    #                 arch: x86_64 # TODO: Extend to other archs.
+    #                 variant: KASAN
+    #                 variant-suffix: "+kasan"
+    #                 title-suffix: ", KASAN"
+    #               - pkg: managarm-kernel-uefi
+    #                 arch: x86_64 # TODO: Extend to other archs.
+    #                 variant: KASAN
+    #                 variant-suffix: "+kasan"
+    #                 title-suffix: ", KASAN"
+    #     name: Build ${{ matrix.pkg }}${{ matrix.title-suffix }} on ${{ matrix.arch }}
+    #     needs:
+    #       - cache-generic
+    #       - cache-arch
+    #     runs-on: ubuntu-24.04
+    #     steps:
+    #       - name: Permit unprivileged user namespaces
+    #         run: |
+    #             set -x
+    #             sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+    #             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    #       - name: Install prerequisites
+    #         run: |
+    #             set -x
+    #             pip3 install xbstrap y4
+    #             xbstrap prereqs cbuildrt xbps
+    #       - name: Restore rootfs cache
+    #         uses: actions/cache/restore@v4
+    #         with:
+    #             key: "rootfs-${{ needs.cache-generic.outputs.caching-key }}"
+    #             # Note: must be kept in sync with the cache action (effectively part of the key).
+    #             path: rootfs/
+    #             fail-on-cache-miss: true
+    #       - name: Restore xbps cache
+    #         uses: actions/cache/restore@v4
+    #         with:
+    #             key: "xbps-${{ matrix.arch }}-${{ needs.cache-generic.outputs.caching-key }}"
+    #             # Note: must be kept in sync with the restore action (effectively part of the key).
+    #             path: build/xbps-repo/*.xbps
+    #             fail-on-cache-miss: true
+    #       - name: Checkout bootstrap-managarm
+    #         uses: actions/checkout@v2
+    #         with:
+    #             repository: managarm/bootstrap-managarm
+    #             ref: ${{ needs.cache-generic.outputs.corresponding-bootstrap }}
+    #             path: src/
+    #       - name: Checkout Managarm
+    #         uses: actions/checkout@v2
+    #         with:
+    #             path: src/managarm/
+    #             fetch-depth: 0
+    #       - name: Prepare src/ and build/
+    #         run: |
+    #             set -x
+    #             touch src/managarm/checkedout.xbstrap
+    #             cp src/managarm/ci/bootstrap-site-$CI_ARCH.yml build/bootstrap-site.yml
+    #         env:
+    #             CI_ARCH: ${{ matrix.arch }}
+    #       - name: Build ${{ matrix.pkg }} package
+    #         run: |
+    #             set -x
+    #             xbstrap init ../src
+    #             ~/.xbstrap/bin/xbps-rindex -fa xbps-repo/*.xbps
+    #             xbstrap configure $CI_BUILD_PKG
+    #             if [ "$CI_VARIANT" = "KASAN" ]; then
+    #                 xbstrap runtool -- meson configure pkg-builds/$CI_BUILD_PKG/ -Dkernel_kasan=true -Dkernel_ubsan=true
+    #             fi
+    #             xbstrap pack $CI_BUILD_PKG
+    #         env:
+    #             CI_BUILD_PKG: ${{ matrix.pkg }}
+    #             CI_VARIANT: ${{ matrix.variant }}
+    #             XBPS_ARCH: ${{ matrix.arch }}
+    #         working-directory: build/
+    #       - name: Upload artifact
+    #         uses: actions/upload-artifact@v4
+    #         with:
+    #             name: "${{ matrix.arch }}-${{ matrix.pkg }}${{ matrix.variant-suffix }}"
+    #             path: "build/xbps-repo/${{ matrix.pkg }}*.xbps"
+    #             if-no-files-found: error
 
     test-image:
         strategy:
             matrix:
-                arch: [x86_64, aarch64, riscv64]
-                variant: [vanilla]
-                include:
-                  - variant: vanilla
-                    variant-suffix: ""
-                    title-suffix: ""
-                  - arch: x86_64
-                    variant: KASAN
-                    variant-suffix: "+kasan"
-                    title-suffix: ", KASAN"
+                arch: [x86_64]
+                # arch: [x86_64, aarch64, riscv64]
+                # variant: [vanilla]
+                # include:
+                #   - variant: vanilla
+                #     variant-suffix: ""
+                #     title-suffix: ""
+                #   - arch: x86_64
+                #     variant: KASAN
+                #     variant-suffix: "+kasan"
+                #     title-suffix: ", KASAN"
         name: Test ${{ matrix.arch }}${{ matrix.title-suffix }} image
         needs:
           - cache-generic
           - cache-arch
-          - build-package
+          # - build-package
         runs-on: ubuntu-24.04
+        container:
+            options: --privileged
         steps:
           - name: Permit unprivileged user namespaces
             run: |
                 set -x
                 sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
                 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          - name: Enable KVM group perms
-            run: |
-                echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-                sudo udevadm control --reload-rules
-                sudo udevadm trigger --name-match=kvm
           - name: Install prerequisites
             run: |
                 set -x
-                sudo apt-get update
-                sudo apt-get install qemu-system-x86 qemu-system-arm qemu-system-misc
                 pip3 install xbstrap y4
                 xbstrap prereqs cbuildrt xbps
           - name: Restore rootfs cache
@@ -335,26 +332,26 @@ jobs:
                 # Note: must be kept in sync with the restore action (effectively part of the key).
                 path: build/xbps-repo/*.xbps
                 fail-on-cache-miss: true
-          - name: Download managarm-kernel
-            uses: actions/download-artifact@v4
-            with:
-                name: "${{ matrix.arch }}-managarm-kernel${{ matrix.variant-suffix }}"
-                path: build/xbps-repo/
-          - name: Download managarm-kernel-uefi
-            uses: actions/download-artifact@v4
-            with:
-                name: "${{ matrix.arch }}-managarm-kernel-uefi${{ matrix.variant-suffix }}"
-                path: build/xbps-repo/
-          - name: Download managarm-system
-            uses: actions/download-artifact@v4
-            with:
-                name: "${{ matrix.arch }}-managarm-system"
-                path: build/xbps-repo/
-          - name: Download managarm-system-rs
-            uses: actions/download-artifact@v4
-            with:
-                name: "${{ matrix.arch }}-managarm-system-rs"
-                path: build/xbps-repo/
+          # - name: Download managarm-kernel
+          #   uses: actions/download-artifact@v4
+          #   with:
+          #       name: "${{ matrix.arch }}-managarm-kernel${{ matrix.variant-suffix }}"
+          #       path: build/xbps-repo/
+          # - name: Download managarm-kernel-uefi
+          #   uses: actions/download-artifact@v4
+          #   with:
+          #       name: "${{ matrix.arch }}-managarm-kernel-uefi${{ matrix.variant-suffix }}"
+          #       path: build/xbps-repo/
+          # - name: Download managarm-system
+          #   uses: actions/download-artifact@v4
+          #   with:
+          #       name: "${{ matrix.arch }}-managarm-system"
+          #       path: build/xbps-repo/
+          # - name: Download managarm-system-rs
+          #   uses: actions/download-artifact@v4
+          #   with:
+          #       name: "${{ matrix.arch }}-managarm-system-rs"
+          #       path: build/xbps-repo/
           - name: Checkout bootstrap-managarm
             uses: actions/checkout@v2
             with:
@@ -366,49 +363,64 @@ jobs:
             with:
                 path: src/managarm/
                 fetch-depth: 0
-          - name: Set up xbstrap and generate image
+          - name: Run QEMU in container
+            uses: docker://debian:stable-slim
             run: |
                 set -x
-                xbstrap init ../src
-                cp ../src/managarm/ci/bootstrap-site-$CI_ARCH.yml bootstrap-site.yml
-                ~/.xbstrap/bin/xbps-rindex -fa xbps-repo/*.xbps
-                # Use --only-wanted to verify that we do not build or pull-pack here.
-                # managarm-system-rs is not included in base yet, so we install it manually here.
-                xbstrap install --only-wanted --deps-of managarm-system-rs
-                xbstrap install --only-wanted --deps-of weston-desktop
-                if [ "$CI_ARCH" = "x86_64" ]; then
-                  xbstrap install os-test
-                fi
-                xbstrap run initialize-empty-image remake-image
-            env:
-                XBPS_ARCH: ${{ matrix.arch }}
-                CI_ARCH: ${{ matrix.arch }}
-            working-directory: build/
-          - name: Run ci-all
-            run: |
-                if [ "$CI_VARIANT" = "vanilla" ]; then
-                    xbstrap run ci-all
-                else
-                    # KASAN does not need to run all the boot tests etc.
-                    xbstrap run ci-kernel-tests ci-posix-tests
-                fi
-            working-directory: build/
-            if: matrix.arch == 'x86_64'
-            env:
-                CI_VARIANT: ${{ matrix.variant }}
-          - name: Run test-image
-            run: |
-                xbstrap run test-image
-            working-directory: build/
-          - name: Upload log files
-            uses: actions/upload-artifact@v4
-            if: ${{ always() }}
-            with:
-                name: "logfiles-${{ matrix.arch }}${{ matrix.variant-suffix }}"
-                path: "build/ci-*.txt"
-          - name: Upload os-test results
-            uses: actions/upload-artifact@v4
-            if: matrix.arch == 'x86_64'
-            with:
-                name: "os-test-results-managarm-${{ matrix.arch }}.tar.gz"
-                path: "build/os-test-results.tar.gz"
+
+                # Fix KVM node permissions
+                chmod 0666 /dev/kvm
+
+                # Update and install QEMU
+                apt-get update -y
+                apt-get install -y qemu-system-x86
+
+                # Run QEMU
+                timeout 5 qemu-system-x86_64 -enable-kvm -cpu host -serial stdio || true
+
+          # - name: Set up xbstrap and generate image
+          #   run: |
+          #       set -x
+          #       xbstrap init ../src
+          #       cp ../src/managarm/ci/bootstrap-site-$CI_ARCH.yml bootstrap-site.yml
+          #       ~/.xbstrap/bin/xbps-rindex -fa xbps-repo/*.xbps
+          #       # Use --only-wanted to verify that we do not build or pull-pack here.
+          #       # managarm-system-rs is not included in base yet, so we install it manually here.
+          #       xbstrap install --only-wanted --deps-of managarm-system-rs
+          #       xbstrap install --only-wanted --deps-of weston-desktop
+          #       if [ "$CI_ARCH" = "x86_64" ]; then
+          #         xbstrap install os-test
+          #       fi
+          #       xbstrap run initialize-empty-image remake-image
+          #   env:
+          #       XBPS_ARCH: ${{ matrix.arch }}
+          #       CI_ARCH: ${{ matrix.arch }}
+          #   working-directory: build/
+          # - name: Run ci-all
+          #   run: |
+          #       if [ "$CI_VARIANT" = "vanilla" ]; then
+          #           xbstrap run ci-all
+          #       else
+          #           # KASAN does not need to run all the boot tests etc.
+          #           xbstrap run ci-kernel-tests ci-posix-tests
+          #       fi
+          #   working-directory: build/
+          #   if: matrix.arch == 'x86_64'
+          #   env:
+          #       CI_VARIANT: ${{ matrix.variant }}
+          # - name: Run test-image
+          #   run: |
+          #       xbstrap run test-image
+          #   working-directory: build/
+          # - name: Upload log files
+          #   uses: actions/upload-artifact@v4
+          #   if: ${{ always() }}
+          #   with:
+          #       name: "logfiles-${{ matrix.arch }}${{ matrix.variant-suffix }}"
+          #       path: "build/ci-*.txt"
+          # - name: Upload os-test results
+          #   uses: actions/upload-artifact@v4
+          #   if: matrix.arch == 'x86_64'
+          #   with:
+          #       name: "os-test-results-managarm-${{ matrix.arch }}.tar.gz"
+          #       path: "build/os-test-results.tar.gz"

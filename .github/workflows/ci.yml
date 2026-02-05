@@ -365,18 +365,19 @@ jobs:
                 fetch-depth: 0
           - name: Run QEMU in container
             uses: docker://debian:stable-slim
-            run: |
-                set -x
+            with:
+                args: |
+                    set -x
 
-                # Fix KVM node permissions
-                chmod 0666 /dev/kvm
+                    # Fix KVM node permissions
+                    chmod 0666 /dev/kvm
 
-                # Update and install QEMU
-                apt-get update -y
-                apt-get install -y qemu-system-x86
+                    # Update and install QEMU
+                    apt-get update -y
+                    apt-get install -y qemu-system-x86
 
-                # Run QEMU
-                timeout 5 qemu-system-x86_64 -enable-kvm -cpu host -serial stdio || true
+                    # Run QEMU
+                    timeout 5 qemu-system-x86_64 -enable-kvm -cpu host -serial stdio || true
 
           # - name: Set up xbstrap and generate image
           #   run: |

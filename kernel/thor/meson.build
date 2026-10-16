@@ -46,6 +46,7 @@ src = files(
 	'generic/event.cpp',
 	'generic/executor-context.cpp',
 	'generic/fiber.cpp',
+	'generic/freya.cpp',
 	'generic/gdbserver.cpp',
 	'generic/hel.cpp',
 	'generic/hierarchy.cpp',

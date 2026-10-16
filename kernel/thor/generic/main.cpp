@@ -14,6 +14,7 @@
 #include <thor-internal/elf-notes.hpp>
 #include <thor-internal/fiber.hpp>
 #include <thor-internal/framebuffer/fb.hpp>
+#include <thor-internal/freya.hpp>
 #include <thor-internal/irq.hpp>
 #include <thor-internal/kerncfg.hpp>
 #include <thor-internal/kernel-log.hpp>
@@ -214,6 +215,8 @@ extern "C" void thorMain() {
 
 		// Parse the initrd image.
 		mfsRoot = frg::construct<MfsDirectory>(*kernelAlloc);
+		smarter::shared_ptr<MemoryView> initrdView;
+		size_t initrdOffset = 0;
 		{
 			auto initrdBase = initrdNote->physicalBase;
 			auto initrdLength = initrdNote->length;
@@ -221,6 +224,20 @@ extern "C" void thorMain() {
 			auto initrdMisalign = initrdBase & (kPageSize - 1);
 			initrdBase &= ~(kPageSize - 1);
 			initrdLength += initrdMisalign;
+
+			// freya gets a view of the image itself rather than a copy of it.
+			// That is only sound because the initrd's physical range is kept out
+			// of the buddy allocator on every boot path: eir reserves it
+			// explicitly for multiboot2, UEFI and device tree, and limine places
+			// modules in LIMINE_MEMMAP_EXECUTABLE_AND_MODULES memory, which is
+			// never turned into an allocatable region.
+			initrdOffset = initrdMisalign;
+			auto initrdViewOutcome = HardwareMemory::create(initrdBase,
+					(initrdLength + kPageSize - 1) & ~size_t{kPageSize - 1},
+					CachingMode::null);
+			if(!initrdViewOutcome)
+				panicLogger() << "thor: Failed to create a view of the initrd" << frg::endlog;
+			initrdView = std::move(*initrdViewOutcome);
 
 			auto base = static_cast<const char *>(KernelVirtualMemory::global().allocate(
 					initrdLength));
@@ -349,6 +366,11 @@ extern "C" void thorMain() {
 		infoLogger() << "thor: Launching user space." << frg::endlog;
 		KernelFiber::asyncBlockCurrent(runMbus());
 		initializeKernletCtl();
+		// TODO: freya serves nothing yet, so thor still launches the servers below
+		//       itself and keeps the mbus server lane. Eventually this call
+		//       replaces all of them.
+		KernelFiber::asyncBlockCurrent(runFreya(std::move(initrdView), initrdOffset,
+				initrdNote->length, smarter::shared_ptr<Stream, LanePolicy>{}));
 		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/sif.bin"));
 		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/dmalog.bin"));
 		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/kernletcc.bin"));

@@ -10,16 +10,17 @@ use core::{
 };
 
 use action::Action;
-use result::{EventResult, FromQueueElement, SimpleResult};
+use result::{EventResult, FromQueueElement, ObserveResult, SimpleResult};
 
 #[cfg(feature = "std")]
 use crate::executor::current_executor;
 use crate::{
-    DmaDeviceId, Time,
+    DmaDeviceId, MappingFlags, Time,
     executor::{Executor, ExecutorInner},
     handle::Handle,
     queue::QueueElement,
     result::Result,
+    thread::Observation,
 };
 
 /// Operation state object. This is used to store the submission and completion
@@ -303,6 +304,96 @@ fn new_header_operation<T>(
         },
         SimpleResult::from_queue_element,
     )
+}
+
+/// Returns a future that waits until `thread` stops and reports why. The
+/// thread stays stopped until it is resumed with [`crate::thread::resume`].
+pub fn observe_with_executor(
+    executor: Executor,
+    thread: &Handle,
+) -> impl Future<Output = Result<Observation>> {
+    let header = hel_sys::HelSqObserve {
+        handle: thread.handle(),
+    };
+
+    new_async_operation(
+        executor.clone_inner(),
+        move |executor, context| {
+            let header_bytes: &[u8] = unsafe {
+                core::slice::from_raw_parts(
+                    &header as *const _ as *const u8,
+                    size_of::<hel_sys::HelSqObserve>(),
+                )
+            };
+            executor.push_sq(hel_sys::kHelSubmitObserve, context as usize, &[header_bytes])
+        },
+        ObserveResult::from_queue_element,
+    )
+}
+
+#[cfg(feature = "std")]
+pub fn observe(thread: &Handle) -> impl Future<Output = Result<Observation>> {
+    observe_with_executor(current_executor(), thread)
+}
+
+/// Returns a future that copies `buffer.len()` bytes at `address` out of
+/// `handle`, which is a memory object, an address space or a thread (whose
+/// address space is then read).
+///
+/// The kernel writes into `buffer` until the future completes, so the future
+/// must be driven to completion rather than dropped.
+pub fn read_memory_with_executor<'a>(
+    executor: Executor,
+    handle: &Handle,
+    address: usize,
+    buffer: &'a mut [u8],
+) -> impl Future<Output = Result<()>> + 'a {
+    let header = hel_sys::HelSqReadMemory {
+        handle: handle.handle(),
+        address,
+        length: buffer.len(),
+        buffer: buffer.as_mut_ptr().cast(),
+    };
+    new_header_operation(executor, hel_sys::kHelSubmitReadMemory, header)
+}
+
+/// Returns a future that copies `buffer` to `address` in `handle`, which is a
+/// memory object, an address space or a thread (whose address space is then
+/// written).
+///
+/// The kernel reads `buffer` until the future completes, so the future must be
+/// driven to completion rather than dropped.
+pub fn write_memory_with_executor<'a>(
+    executor: Executor,
+    handle: &Handle,
+    address: usize,
+    buffer: &'a [u8],
+) -> impl Future<Output = Result<()>> + 'a {
+    let header = hel_sys::HelSqWriteMemory {
+        handle: handle.handle(),
+        address,
+        length: buffer.len(),
+        buffer: buffer.as_ptr().cast(),
+    };
+    new_header_operation(executor, hel_sys::kHelSubmitWriteMemory, header)
+}
+
+/// Returns a future that changes the protection of the mappings in
+/// `[address, address + size)` of `space` to `flags`.
+pub fn protect_memory_with_executor(
+    executor: Executor,
+    space: &Handle,
+    address: usize,
+    size: usize,
+    flags: MappingFlags,
+) -> impl Future<Output = Result<()>> {
+    let header = hel_sys::HelSqProtectMemory {
+        spaceHandle: space.handle(),
+        pointer: address as *mut core::ffi::c_void,
+        size,
+        flags: flags.bits(),
+    };
+    new_header_operation(executor, hel_sys::kHelSubmitProtectMemory, header)
 }
 
 /// Returns a future that programs an IOMMU to translate the DMA requests of a device

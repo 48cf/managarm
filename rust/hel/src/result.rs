@@ -82,6 +82,34 @@ impl From<hel_sys::HelError> for Error {
     }
 }
 
+impl From<Error> for hel_sys::HelError {
+    /// Recovers the raw error code, e.g. to report an error to another thread.
+    fn from(error: Error) -> Self {
+        (match error {
+            Error::IllegalSyscall => hel_sys::kHelErrIllegalSyscall,
+            Error::IllegalArgs => hel_sys::kHelErrIllegalArgs,
+            Error::IllegalState => hel_sys::kHelErrIllegalState,
+            Error::UnsupportedOperation => hel_sys::kHelErrUnsupportedOperation,
+            Error::OutOfBounds => hel_sys::kHelErrOutOfBounds,
+            Error::QueueTooSmall => hel_sys::kHelErrQueueTooSmall,
+            Error::Cancelled => hel_sys::kHelErrCancelled,
+            Error::NoDescriptor => hel_sys::kHelErrNoDescriptor,
+            Error::BadDescriptor => hel_sys::kHelErrBadDescriptor,
+            Error::ThreadTerminated => hel_sys::kHelErrThreadTerminated,
+            Error::TransmissionMismatch => hel_sys::kHelErrTransmissionMismatch,
+            Error::LaneShutdown => hel_sys::kHelErrLaneShutdown,
+            Error::EndOfLane => hel_sys::kHelErrEndOfLane,
+            Error::Dismissed => hel_sys::kHelErrDismissed,
+            Error::BufferTooSmall => hel_sys::kHelErrBufferTooSmall,
+            Error::Fault => hel_sys::kHelErrFault,
+            Error::RemoteFault => hel_sys::kHelErrRemoteFault,
+            Error::NoHardwareSupport => hel_sys::kHelErrNoHardwareSupport,
+            Error::NoMemory => hel_sys::kHelErrNoMemory,
+            Error::AlreadyExists => hel_sys::kHelErrAlreadyExists,
+        }) as hel_sys::HelError
+    }
+}
+
 pub type Result<T> = core::result::Result<T, Error>;
 
 /// Utility function to check Hel errors and convert them to `Result`.

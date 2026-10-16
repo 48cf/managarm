@@ -108,6 +108,38 @@ impl Handle {
         })
     }
 
+    /// Transfers the handle into the given universe, keeping only the given rights.
+    /// This is how a process hands descriptors to another universe without
+    /// granting more than it intends to.
+    pub fn transfer_into(&self, universe: &Handle, rights: hel_sys::HelRights) -> Result<Self> {
+        let mut new_handle = hel_sys::kHelNullHandle as hel_sys::HelHandle;
+
+        hel_check(unsafe {
+            hel_sys::helTransferDescriptor(
+                self.handle,
+                universe.handle,
+                hel_sys::kHelTransferDescriptorOut,
+                rights,
+                hel_sys::kHelRightNull,
+                &mut new_handle,
+            )
+        })?;
+
+        Ok(Handle {
+            handle: new_handle,
+            universe: universe.handle,
+        })
+    }
+
+    /// Releases ownership of the handle without closing it and returns the
+    /// raw handle. This is used for descriptors that are handed to another
+    /// universe and must outlive this object.
+    pub fn into_raw(self) -> hel_sys::HelHandle {
+        let handle = self.handle;
+        core::mem::forget(self);
+        handle
+    }
+
     /// Clones the handle into the current universe. This function is a convenience
     /// method that calls `clone_into` with the current universe handle.
     pub fn clone_handle(&self) -> Result<Self> {

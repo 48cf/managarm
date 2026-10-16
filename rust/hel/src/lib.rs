@@ -13,6 +13,7 @@ pub mod mapping;
 pub mod queue;
 pub mod result;
 pub mod submission;
+pub mod thread;
 
 use alloc::vec::Vec;
 use core::time::Duration;
@@ -29,6 +30,7 @@ pub use submission::action::{
 };
 #[cfg(feature = "std")]
 pub use submission::{await_event, sleep_for, sleep_until, submit_async};
+pub use thread::{Observation, Registers, ThreadFlags};
 
 /// Creates a pair of connected lanes that can be used to communicate.
 pub fn create_stream() -> Result<(Handle, Handle)> {
@@ -197,6 +199,110 @@ pub fn allocate_memory(
         )
     })?;
     Ok(unsafe { Handle::from_raw(handle) })
+}
+
+/// Creates a copy-on-write view of `size` bytes of `memory`, starting at `offset`.
+///
+/// Private copies are charged to `hierarchy`. If `swap_space` is given, they are
+/// backed by it and can be swapped out; otherwise they stay resident.
+pub fn copy_on_write(
+    hierarchy: &Handle,
+    swap_space: Option<&Handle>,
+    memory: &Handle,
+    offset: usize,
+    size: usize,
+) -> Result<Handle> {
+    let mut handle = hel_sys::kHelNullHandle as hel_sys::HelHandle;
+    result::hel_check(unsafe {
+        hel_sys::helCopyOnWrite(
+            hierarchy.handle(),
+            swap_space.unwrap_or(Handle::null()).handle(),
+            memory.handle(),
+            offset,
+            size,
+            &mut handle,
+        )
+    })?;
+    Ok(unsafe { Handle::from_raw(handle) })
+}
+
+/// Creates a view of `size` bytes of `memory`, starting at `offset`.
+pub fn create_slice_view(memory: &Handle, offset: usize, size: usize) -> Result<Handle> {
+    let mut handle = hel_sys::kHelNullHandle as hel_sys::HelHandle;
+    result::hel_check(unsafe {
+        hel_sys::helCreateSliceView(memory.handle(), offset, size, 0, &mut handle)
+    })?;
+    Ok(unsafe { Handle::from_raw(handle) })
+}
+
+/// Maps `size` bytes of `memory`, starting at `offset`, into `space` and returns
+/// the address of the mapping. Unlike [`Mapping`], the mapping is not removed
+/// when anything is dropped; it lives until it is unmapped explicitly or the
+/// address space goes away.
+///
+/// # Safety
+///
+/// If `space` is the current address space (including [`Handle::null`]), a
+/// fixed `address` may replace memory that Rust objects live in.
+pub unsafe fn map_memory(
+    memory: &Handle,
+    space: &Handle,
+    address: Option<usize>,
+    offset: usize,
+    size: usize,
+    flags: MappingFlags,
+) -> Result<usize> {
+    let mut pointer = core::ptr::null_mut();
+    result::hel_check(unsafe {
+        hel_sys::helMapMemory(
+            memory.handle(),
+            space.handle(),
+            address.map_or(core::ptr::null_mut(), |address| address as *mut core::ffi::c_void),
+            offset,
+            size,
+            flags.bits(),
+            &mut pointer,
+        )
+    })?;
+    Ok(pointer as usize)
+}
+
+/// Removes the mappings in `[address, address + size)` from `space`.
+///
+/// # Safety
+///
+/// If `space` is the current address space, no Rust object may live in the range.
+pub unsafe fn unmap_memory(space: &Handle, address: usize, size: usize) -> Result<()> {
+    result::hel_check(unsafe {
+        hel_sys::helUnmapMemory(space.handle(), address as *mut core::ffi::c_void, size)
+    })
+}
+
+/// Creates a child of `parent` in the memory accounting hierarchy, labelled `tag`.
+/// Tags longer than the kernel's limit are truncated.
+pub fn extend_hierarchy(parent: &Handle, tag: &str) -> Result<Handle> {
+    let mut params = hel_sys::HelHierarchyParameters { tag: [0; 128] };
+    // Keep the final byte as the terminator.
+    let length = tag.len().min(params.tag.len() - 1);
+    for (dst, src) in params.tag.iter_mut().zip(&tag.as_bytes()[..length]) {
+        *dst = *src as _;
+    }
+
+    let mut handle = hel_sys::kHelNullHandle as hel_sys::HelHandle;
+    result::hel_check(unsafe {
+        hel_sys::helExtendHierarchy(parent.handle(), &params, &mut handle)
+    })?;
+    Ok(unsafe { Handle::from_raw(handle) })
+}
+
+/// Fills `buffer` with random bytes from the kernel's entropy pool and returns
+/// how many bytes were written.
+pub fn get_random_bytes(buffer: &mut [u8]) -> Result<usize> {
+    let mut written = 0;
+    result::hel_check(unsafe {
+        hel_sys::helGetRandomBytes(buffer.as_mut_ptr().cast(), buffer.len(), &mut written)
+    })?;
+    Ok(written)
 }
 
 /// Translates a virtual address of the current address space to the physical address

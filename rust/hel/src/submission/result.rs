@@ -4,6 +4,7 @@ use crate::{
     handle::Handle,
     queue::QueueElement,
     result::{Result, hel_check},
+    thread::Observation,
 };
 
 pub trait FromQueueElement {
@@ -181,5 +182,26 @@ impl FromQueueElement for InlineResult {
         element.advance(result.length.next_multiple_of(8));
 
         hel_check(result.error).map(|_| inline_data.to_owned())
+    }
+}
+
+pub struct ObserveResult;
+
+impl FromQueueElement for ObserveResult {
+    type Output = Result<Observation>;
+
+    fn from_queue_element(element: &mut QueueElement) -> Self::Output {
+        let data = element.data();
+
+        assert!(data.len() >= size_of::<hel_sys::HelObserveResult>());
+
+        // SAFETY: The data is guaranteed to contain enough bytes
+        // to read a [`hel_sys::HelObserveResult`]` and that it is
+        // correctly aligned.
+        let result = unsafe { data.as_ptr().cast::<hel_sys::HelObserveResult>().read() };
+
+        element.advance(size_of::<hel_sys::HelObserveResult>());
+
+        hel_check(result.error).map(|_| Observation::from_raw(result.observation))
     }
 }

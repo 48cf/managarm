@@ -12,15 +12,34 @@ use alloc::{
     vec::Vec,
 };
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use hel::{Handle, Mapping, MappingFlags};
 use spin::{LazyLock, Mutex};
 
 /// Page size, which `helCopyOnWrite` requires its size to be a multiple of.
 const PAGE_SIZE: usize = 0x1000;
 
-#[derive(Default)]
+/// Inode numbers are handed out in creation order and never reused; nodes
+/// are never removed from the tree.
+static NEXT_INODE: AtomicU64 = AtomicU64::new(1);
+
+fn allocate_inode() -> u64 {
+    NEXT_INODE.fetch_add(1, Ordering::Relaxed)
+}
+
 pub struct VfsDirectory {
     entries: Mutex<BTreeMap<String, Arc<VfsNode>>>,
+    inode: u64,
+}
+
+impl Default for VfsDirectory {
+    fn default() -> Self {
+        Self {
+            entries: Default::default(),
+            inode: allocate_inode(),
+        }
+    }
 }
 
 impl VfsDirectory {
@@ -37,6 +56,7 @@ impl VfsDirectory {
 pub struct VfsFile {
     memory_handle: Handle,
     length: usize,
+    inode: u64,
 }
 
 impl VfsFile {
@@ -55,7 +75,17 @@ pub enum VfsNode {
     Directory(VfsDirectory),
     File(VfsFile),
     /// `/dev/urandom`, whose reads are served from the kernel's entropy pool.
-    Urandom,
+    Urandom { inode: u64 },
+}
+
+impl VfsNode {
+    pub fn inode(&self) -> u64 {
+        match self {
+            Self::Directory(directory) => directory.inode,
+            Self::File(file) => file.inode,
+            Self::Urandom { inode } => *inode,
+        }
+    }
 }
 
 static ROOT: LazyLock<Arc<VfsNode>> =
@@ -205,6 +235,7 @@ pub fn unpack_initrd(hierarchy: hel_sys::HelHandle, initrd: &[u8]) {
             let file = VfsNode::File(VfsFile {
                 memory_handle: memory_for(hierarchy, entry.file()),
                 length: entry.file().len(),
+                inode: allocate_inode(),
             });
 
             directory
@@ -302,6 +333,7 @@ pub fn upload(hierarchy: hel_sys::HelHandle, path: &str, contents: &[u8]) -> Upl
     let file = VfsNode::File(VfsFile {
         memory_handle: memory_for(hierarchy, contents),
         length: contents.len(),
+        inode: allocate_inode(),
     });
     directory
         .entries
@@ -320,5 +352,7 @@ pub fn add_device_nodes() {
     directory
         .entries
         .lock()
-        .insert("urandom".to_string(), Arc::new(VfsNode::Urandom));
+        .insert("urandom".to_string(), Arc::new(VfsNode::Urandom {
+            inode: allocate_inode(),
+        }));
 }

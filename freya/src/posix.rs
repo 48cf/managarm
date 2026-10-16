@@ -25,6 +25,7 @@ const MAP_ANONYMOUS: u32 = 0x20;
 
 /// `AT_FDCWD`; there is no other directory to resolve paths against.
 const AT_FDCWD: i32 = -100;
+const AT_EMPTY_PATH: i32 = 0x1000;
 
 fn protection(mode: u32) -> MappingFlags {
     let mut flags = MappingFlags::empty();
@@ -121,7 +122,7 @@ async fn serve_requests(process: &Rc<Process>, thread: &ThreadInfo, lane: &Handl
                 let file = vfs::lookup(request.path()).map(|node| match &*node {
                     VfsNode::Directory(_) => OpenFile::Directory(node),
                     VfsNode::File(_) => OpenFile::Regular(node),
-                    VfsNode::Urandom => OpenFile::Urandom,
+                    VfsNode::Urandom { .. } => OpenFile::Urandom(node),
                 });
                 match file.map(|file| process.open_file(file)) {
                     None => response.set_error(posix::Errors::FileNotFound),
@@ -139,24 +140,42 @@ async fn serve_requests(process: &Rc<Process>, thread: &ThreadInfo, lane: &Handl
         } else if is!(posix::FstatAtRequest) {
             let request = parse_head_tail!(posix::FstatAtRequest);
             let mut response = posix::FstatAtResponse::default();
-            match vfs::lookup(request.path()).as_deref() {
-                Some(VfsNode::File(file)) => {
-                    response.set_error(posix::Errors::Success);
-                    response.set_file_size(file.len() as u64);
-                    response.set_file_type(posix::FileType::FT_REGULAR);
+
+            let stated = if request.flags() & AT_EMPTY_PATH != 0 && request.path().is_empty() {
+                // fstat(): rtld uses the inode to tell loaded libraries apart.
+                let files = process.files.borrow();
+                match usize::try_from(request.fd()).ok().and_then(|fd| files.get(fd)?.clone()) {
+                    Some(file) => match file.node() {
+                        Some(node) => stat_node(&mut response, node),
+                        None => {
+                            // The standard streams go to the kernel log.
+                            response.set_file_type(posix::FileType::FT_CHAR_DEVICE);
+                            true
+                        }
+                    },
+                    None => false,
                 }
-                // thor kept /dev/urandom as an empty regular file.
-                Some(VfsNode::Urandom) => {
-                    response.set_error(posix::Errors::Success);
-                    response.set_file_size(0);
-                    response.set_file_type(posix::FileType::FT_REGULAR);
+            } else if request.fd() == AT_FDCWD {
+                match vfs::lookup(request.path()) {
+                    Some(node) => stat_node(&mut response, &node),
+                    None => false,
                 }
-                _ => {
-                    info!("freya: cannot stat file {}", request.path());
-                    response.set_error(posix::Errors::FileNotFound);
-                    // Required by the encoder; C++ leaves it zero as well.
-                    response.set_file_type(posix::FileType::FT_UNKNOWN);
-                }
+            } else {
+                false
+            };
+
+            if stated {
+                response.set_error(posix::Errors::Success);
+            } else {
+                info!(
+                    "freya: cannot stat '{}' (fd {}) for {}",
+                    request.path(),
+                    request.fd(),
+                    process.name
+                );
+                response.set_error(posix::Errors::FileNotFound);
+                // Required by the encoder; C++ leaves it zero as well.
+                response.set_file_type(posix::FileType::FT_UNKNOWN);
             }
             ipc::send_head(executor, &conversation, &response).await?;
         } else if is!(posix::IsTtyRequest) {
@@ -214,6 +233,22 @@ async fn serve_requests(process: &Rc<Process>, thread: &ThreadInfo, lane: &Handl
     }
 
     Ok(())
+}
+
+/// Describes `node` in `response`. Always succeeds; the result says so to
+/// keep the call sites uniform.
+fn stat_node(response: &mut posix::FstatAtResponse, node: &VfsNode) -> bool {
+    let (file_type, size) = match node {
+        VfsNode::File(file) => (posix::FileType::FT_REGULAR, file.len() as u64),
+        VfsNode::Directory(_) => (posix::FileType::FT_DIRECTORY, 0),
+        // thor kept /dev/urandom as an empty regular file.
+        VfsNode::Urandom { .. } => (posix::FileType::FT_REGULAR, 0),
+    };
+    response.set_file_type(file_type);
+    response.set_file_size(size);
+    response.set_fs_inode(node.inode());
+    response.set_num_links(1);
+    true
 }
 
 /// Maps anonymous memory or an initrd file into the server, privately.

@@ -23,12 +23,20 @@ pub enum OpenFile {
     Stdio,
     Regular(Arc<VfsNode>),
     Directory(Arc<VfsNode>),
-    Urandom,
+    Urandom(Arc<VfsNode>),
 }
 
 impl OpenFile {
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Stdio)
+    }
+
+    /// The node in the file tree that the file was opened from, if any.
+    pub fn node(&self) -> Option<&VfsNode> {
+        match self {
+            Self::Stdio => None,
+            Self::Regular(node) | Self::Directory(node) | Self::Urandom(node) => Some(node),
+        }
     }
 
     /// The memory object backing a regular file, for mapping it.
@@ -72,7 +80,7 @@ pub async fn serve(executor: Executor, lane: Handle, file: Rc<OpenFile>) {
             VfsNode::Directory(_) => serve_directory(&executor, &lane, node).await,
             _ => unreachable!(),
         },
-        OpenFile::Urandom => serve_urandom(&executor, &lane).await,
+        OpenFile::Urandom(_) => serve_urandom(&executor, &lane).await,
     };
     if let Err(error) = result {
         warn!("freya: stopped serving a file: {error}");

@@ -4,8 +4,19 @@
 extern crate alloc;
 
 mod allocator;
+mod elf;
+mod files;
+mod ipc;
 mod logging;
+mod posix;
+mod process;
+mod servers;
 mod vfs;
+
+use alloc::rc::Rc;
+
+use hel::Handle;
+use hel::executor::Executor;
 
 #[global_allocator]
 static ALLOCATOR: allocator::HelAllocator = allocator::HelAllocator;
@@ -50,6 +61,21 @@ pub unsafe extern "C" fn _start() -> ! {
     )
 }
 
+/// What freya works with once it is running: its own resources and the
+/// state shared by the servers it runs.
+pub struct Freya {
+    pub executor: Executor,
+    /// freya's own hierarchy; each server gets a child of it.
+    pub hierarchy: Handle,
+    /// The client lane to mbus, which every server gets a copy of.
+    pub mbus_client: Handle,
+    /// The server lane to mbus, which only mbus itself gets.
+    pub mbus_server: Handle,
+    /// The token that servers asking for `access:thor.hardware` get.
+    pub hardware_access: Handle,
+    pub servers: process::ServerRegistry,
+}
+
 extern "C" fn freya_main(bootstrap: *const hel_sys::HelBootstrapData) -> ! {
     info!("freya: started");
 
@@ -67,17 +93,27 @@ extern "C" fn freya_main(bootstrap: *const hel_sys::HelBootstrapData) -> ! {
     vfs::add_device_nodes();
     info!("freya: unpacked the initrd");
 
-    // Stage 0 has nothing to serve the tree to yet, so prove it is usable by
-    // looking up the one file freya can check against itself.
-    match vfs::lookup("usr/bin/freya").as_deref() {
-        Some(vfs::VfsNode::File(file)) => {
-            info!("freya: usr/bin/freya is {} bytes in the vfs", file.len());
-        }
-        Some(_) => panic!("freya: usr/bin/freya is not a regular file"),
-        None => panic!("freya: usr/bin/freya is missing from the vfs"),
-    }
+    // SAFETY: thor attached these descriptors to freya's universe for freya
+    // alone, and nothing else in freya wraps them.
+    let freya = unsafe {
+        Rc::new(Freya {
+            executor: Executor::new().expect("freya: failed to create an executor"),
+            hierarchy: Handle::from_raw(bootstrap.hierarchy),
+            mbus_client: Handle::from_raw(bootstrap.mbusClientLane),
+            mbus_server: Handle::from_raw(bootstrap.mbusServerLane),
+            hardware_access: Handle::from_raw(bootstrap.hardwareAccess),
+            servers: Default::default(),
+        })
+    };
 
-    panic!("freya: reached end of freya_main");
+    let executor = freya.executor.clone();
+    let result = executor.block_on(async move {
+        servers::boot(&freya);
+        info!("freya: launched the boot servers");
+        // Keep serving the servers' lanes and supercalls forever.
+        core::future::pending::<()>().await
+    });
+    panic!("freya: the executor stopped: {:?}", result.err());
 }
 
 /// Maps the initrd handed over by thor and returns the image as a slice.

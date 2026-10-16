@@ -26,7 +26,8 @@ constexpr const char *freyaPath = "usr/bin/freya";
 } // anonymous namespace
 
 coroutine<void> runFreya(smarter::shared_ptr<MemoryView> initrdView, size_t initrdOffset,
-		size_t initrdSize, smarter::shared_ptr<Stream, LanePolicy> mbusServerLane) {
+		size_t initrdSize, smarter::shared_ptr<Stream, LanePolicy> mbusServerLane,
+		smarter::shared_ptr<Stream, LanePolicy> mbusClientLane) {
 	auto module = resolveModule(freyaPath);
 	if(!module)
 		panicLogger() << "thor: Could not find " << freyaPath << " in the initrd" << frg::endlog;
@@ -77,11 +78,12 @@ coroutine<void> runFreya(smarter::shared_ptr<MemoryView> initrdView, size_t init
 		AnyDescriptor::make<DescriptorType::memoryView>(std::move(initrdView),
 				kHelRightRead | kHelRightAssign)
 	);
-	if(mbusServerLane) {
-		bootstrap.mbusServerLane = universe->attachDescriptor(
-			AnyDescriptor::make<DescriptorType::lane>(std::move(mbusServerLane), kHelRightInvoke)
-		);
-	}
+	bootstrap.mbusServerLane = universe->attachDescriptor(
+		AnyDescriptor::make<DescriptorType::lane>(std::move(mbusServerLane), kHelRightInvoke)
+	);
+	bootstrap.mbusClientLane = universe->attachDescriptor(
+		AnyDescriptor::make<DescriptorType::lane>(std::move(mbusClientLane), kHelRightInvoke)
+	);
 	// freya grants this on to the servers whose description asks for
 	// 'access:thor.hardware', the way runService() does today. kHelRightInvoke is
 	// all it needs to do so: helTransferDescriptor() checks kHelRightGrant on the

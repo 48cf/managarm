@@ -364,21 +364,11 @@ extern "C" void thorMain() {
 		initializeSvrctl();
 		KernelFiber::asyncBlockCurrent(initPosixEmulation());
 		infoLogger() << "thor: Launching user space." << frg::endlog;
-		KernelFiber::asyncBlockCurrent(runMbus());
 		initializeKernletCtl();
-		// TODO: freya serves nothing yet, so thor still launches the servers below
-		//       itself and keeps the mbus server lane. Eventually this call
-		//       replaces all of them.
+		// freya launches mbus and the boot servers. thor's own mbus objects,
+		// created above, are published once mbus runs.
 		KernelFiber::asyncBlockCurrent(runFreya(std::move(initrdView), initrdOffset,
-				initrdNote->length, smarter::shared_ptr<Stream, LanePolicy>{}));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/sif.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/dmalog.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/kernletcc.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/posix-devserver.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/clocktracker.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/netserver.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/posix-subsystem.bin"));
-		KernelFiber::asyncBlockCurrent(runServerFromInitrd("usr/lib/managarm/server/tty-virtio-console.bin"));
+				initrdNote->length, takeMbusServerLane(), getMbusClientLane()));
 	});
 
 	Scheduler::resume(getCpuData()->wqFiber);

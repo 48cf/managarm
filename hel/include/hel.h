@@ -1201,9 +1201,12 @@ struct HelBootstrapData {
 	size_t initrdOffset;
 	//! Size of the initrd image in bytes.
 	size_t initrdSize;
-	//! Server end of the mbus lane. thor retains the client end to publish its
-	//! own mbus objects.
+	//! Server end of the mbus lane, which freya hands to mbus when it
+	//! launches it.
 	HelHandle mbusServerLane;
+	//! Client end of the mbus lane. Every client shares it; thor keeps it too,
+	//! to publish its own mbus objects, and freya hands it to each server.
+	HelHandle mbusClientLane;
 	//! The token that helAccessIo(), helAccessPhysical() and helAccessIrq()
 	//! check the caller against, so that freya can grant 'access:thor.hardware'
 	//! to the servers that ask for it.

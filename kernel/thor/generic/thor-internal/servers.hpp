@@ -9,7 +9,11 @@ namespace thor {
 void initializeSvrctl();
 void initializeMbusStream();
 coroutine<void> initPosixEmulation();
-coroutine<void> runMbus();
+
+// The two ends of the mbus lane. The server end can only be taken once; it
+// goes to freya, which launches mbus.
+smarter::shared_ptr<Stream, LanePolicy> takeMbusServerLane();
+smarter::shared_ptr<Stream, LanePolicy> getMbusClientLane();
 
 coroutine<smarter::shared_ptr<Stream, LanePolicy>> runServer(
 	managarm::svrctl::Description<KernelAlloc> &desc

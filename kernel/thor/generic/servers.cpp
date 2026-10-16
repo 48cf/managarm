@@ -315,30 +315,15 @@ void initializeMbusStream() {
 	futureMbusServer.initialize(std::move(mbusStreamOutcome->get<0>()));
 }
 
-coroutine<void> runMbus() {
-	if(debugLaunch)
-		infoLogger() << "thor: Launching mbus" << frg::endlog;
+smarter::shared_ptr<Stream, LanePolicy> takeMbusServerLane() {
+	assert(futureMbusServer.valid());
+	auto lane = std::move(*futureMbusServer);
+	futureMbusServer.destruct();
+	return lane;
+}
 
-	auto desc = co_await parseServerFromInitrd("usr/lib/managarm/server/mbus.bin");
-
-	frg::tuple<smarter::shared_ptr<Stream, LanePolicy>, smarter::shared_ptr<Stream, LanePolicy>> controlStream;
-	{
-		auto lock = frg::guard(&allServersMutex);
-
-		assert(!allServers->get(desc.name()));
-
-		auto controlStreamOutcome = createStream();
-		if(!controlStreamOutcome)
-			panicLogger() << "thor: Failed to create stream" << frg::endlog;
-		controlStream = std::move(*controlStreamOutcome);
-		allServers->insert(desc.name(), controlStream.get<1>());
-	}
-
-	auto module = resolveModule(desc.exec());
-	assert(module && module->type == MfsType::regular);
-	co_await executeModule(desc, static_cast<MfsRegular *>(module),
-			controlStream.get<0>(),
-			std::move(*futureMbusServer), &localScheduler.get());
+smarter::shared_ptr<Stream, LanePolicy> getMbusClientLane() {
+	return *mbusClient;
 }
 
 coroutine<smarter::shared_ptr<Stream, LanePolicy>> runServer(

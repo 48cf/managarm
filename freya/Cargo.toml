@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bragi = { version = "0.3.2", default-features = false }
 cpio_reader = "0.1"
 # hel's `std` feature only gates its ambient executor, which freya has no std to
 # gate on. The path is spelled out rather than inherited from the workspace
@@ -11,6 +12,7 @@ cpio_reader = "0.1"
 # workspace dependency leaves on.
 hel = { path = "../rust/hel", default-features = false }
 hel-sys.workspace = true
+managarm-core.workspace = true
 spin = "0.12"
 
 [build-dependencies]

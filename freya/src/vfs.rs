@@ -49,10 +49,6 @@ impl VfsFile {
     pub fn len(&self) -> usize {
         self.length
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.length == 0
-    }
 }
 
 pub enum VfsNode {
@@ -82,6 +78,11 @@ static ZERO_MEMORY: LazyLock<Handle> = LazyLock::new(|| {
     // SAFETY: helObtainHandle returned a fresh handle in freya's universe.
     unsafe { Handle::from_raw(handle) }
 });
+
+/// Returns the kernel's shared zero-filled memory object.
+pub fn zero_memory() -> &'static Handle {
+    &ZERO_MEMORY
+}
 
 /// Returns the directory a path's last component lives in, creating any missing
 /// components on the way.

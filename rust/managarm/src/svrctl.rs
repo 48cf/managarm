@@ -2,23 +2,14 @@ use hel::Handle;
 use std::mem::ManuallyDrop;
 use std::sync::LazyLock;
 
-#[repr(i32)]
-pub enum SvrctlSupercall {
-    GetServerData = 64,
-}
-
-#[derive(Default)]
-#[repr(C)]
-struct ManagarmServerData {
-    hardware_access: hel_sys::HelHandle,
-    control_lane: hel_sys::HelHandle,
-}
+pub use managarm_core::data::SvrctlSupercall;
+use managarm_core::data::ManagarmServerData;
 
 static SERVER_DATA: LazyLock<ManagarmServerData> = LazyLock::new(|| {
     let mut server_data = ManagarmServerData::default();
     let result = unsafe {
         hel_sys::helSyscall2(
-            hel_sys::kHelCallSuper as i32 + SvrctlSupercall::GetServerData as i32,
+            hel_sys::kHelCallSuper as i32 + SvrctlSupercall::GetServerData as u32 as i32,
             (&raw mut server_data).addr() as u64,
             std::mem::size_of::<ManagarmServerData>() as u64,
         )

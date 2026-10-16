@@ -9,6 +9,7 @@ async-trait = "0.1"
 bragi = "0.3"
 hel.workspace = true
 hel-sys.workspace = true
+managarm-core.workspace = true
 thiserror = "2.0"
 
 [build-dependencies]

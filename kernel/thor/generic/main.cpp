@@ -21,11 +21,11 @@
 #include <thor-internal/kernlet.hpp>
 #include <thor-internal/load-balancing.hpp>
 #include <thor-internal/main.hpp>
+#include <thor-internal/mbus.hpp>
 #include <thor-internal/module.hpp>
 #include <thor-internal/physical.hpp>
 #include <thor-internal/profile.hpp>
 #include <thor-internal/random.hpp>
-#include <thor-internal/servers.hpp>
 #include <thor-internal/smbios/smbios.hpp>
 #include <thor-internal/thread.hpp>
 #include <thor-internal/traps.hpp>
@@ -43,6 +43,45 @@ bool debugToSerial = false;
 bool debugToBochs = false;
 
 MfsDirectory *mfsRoot;
+
+// The MFS tree is only written while the initrd is parsed below, so lookups
+// need no lock.
+MfsNode *resolveModule(frg::string_view path) {
+	const char *begin = path.data();
+	const char *end = path.data() + path.size();
+	auto it = begin;
+
+	// We have no VFS. Relative paths are absolute.
+	if(it != end && *it == '/')
+		++it;
+
+	// Parse each individual component.
+	MfsNode *node = mfsRoot;
+	while(it != end) {
+		auto slash = std::find(it, end, '/');
+
+		auto component = path.sub_string(it - begin, slash - it);
+		if(component == "..") {
+			return nullptr;
+		}else if(component.size() && component != ".") {
+			// We discard multiple slashes and single-dots.
+			if(node->type != MfsType::directory)
+				return nullptr;
+			auto directory = static_cast<MfsDirectory *>(node);
+			auto target = directory->getTarget(component);
+			if(!target)
+				return nullptr;
+			node = target;
+		}
+
+		// Finally we need to skip the slash we found.
+		it = slash;
+		if(it != end)
+			++it;
+	}
+
+	return node;
+}
 
 void setupDebugging();
 
@@ -361,8 +400,6 @@ extern "C" void thorMain() {
 
 		// Launch initial user space programs.
 		initializeKerncfg();
-		initializeSvrctl();
-		KernelFiber::asyncBlockCurrent(initPosixEmulation());
 		infoLogger() << "thor: Launching user space." << frg::endlog;
 		initializeKernletCtl();
 		// freya launches mbus and the boot servers. thor's own mbus objects,

@@ -11,6 +11,7 @@ mod logging;
 mod posix;
 mod process;
 mod servers;
+mod svrctl;
 mod vfs;
 
 use alloc::rc::Rc;
@@ -110,6 +111,9 @@ extern "C" fn freya_main(bootstrap: *const hel_sys::HelBootstrapData) -> ! {
     let result = executor.block_on(async move {
         servers::boot(&freya);
         info!("freya: launched the boot servers");
+        // svrctl lets userspace run further servers. It is published once mbus,
+        // which boot() launched first, accepts the request.
+        freya.executor.spawn(svrctl::run(freya.clone()));
         // Keep serving the servers' lanes and supercalls forever.
         core::future::pending::<()>().await
     });

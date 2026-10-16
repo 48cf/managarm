@@ -7,6 +7,14 @@
 
 namespace thor {
 
+// Creates the stream that connects mbus to its clients. thor keeps the client
+// end for its own objects; both ends are also handed to freya.
+void initializeMbusStream();
+
+// The server end can only be taken once; it goes to freya, which launches mbus.
+smarter::shared_ptr<Stream, LanePolicy> takeMbusServerLane();
+smarter::shared_ptr<Stream, LanePolicy> getMbusClientLane();
+
 struct Properties {
 	friend struct KernelBusObject;
 

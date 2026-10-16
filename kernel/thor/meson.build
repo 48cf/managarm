@@ -76,13 +76,11 @@ src = files(
 	'generic/profile.cpp',
 	'generic/random.cpp',
 	'generic/rcu.cpp',
-	'generic/service.cpp',
 	'generic/schedule.cpp',
 	'generic/stream.cpp',
 	'generic/thread.cpp',
 	'generic/timer.cpp',
 	'generic/traps.cpp',
-	'generic/servers.cpp',
 	'generic/ubsan.cpp',
 	'generic/universe.cpp',
 	'generic/user-clock.cpp',
@@ -98,16 +96,13 @@ src = files(
 )
 
 src += frgbragi.process([
-	protos/'fs/fs.bragi',
 	protos/'hw/hw.bragi',
 	protos/'mbus/mbus.bragi',
 	protos/'ostrace/ostrace.bragi',
-	protos/'posix/posix.bragi',
 	protos/'clock/clock.bragi',
 	protos/'kernlet/kernlet.bragi',
 	protos/'kerncfg/kerncfg.bragi',
 	protos/'shm/shm.bragi',
-	protos/'svrctl/svrctl.bragi'
 ])
 
 klibc_inc = include_directories('../klibc')
@@ -121,9 +116,7 @@ inc += include_directories(
 	'system/legacy-pc',
 	'system/smbios',
 	'../common',
-	'../../protocols/posix/include',
 	'../../protocols/shm/include',
-	'../../protocols/svrctl/include',
 )
 
 # For now, we only use static initializers for initgraph stages.

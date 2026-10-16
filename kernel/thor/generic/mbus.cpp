@@ -8,8 +8,27 @@
 
 namespace thor {
 
-// TODO: Move this to a header file.
-extern frg::manual_box<smarter::shared_ptr<Stream, LanePolicy>> mbusClient;
+static frg::manual_box<smarter::shared_ptr<Stream, LanePolicy>> mbusClient;
+static frg::manual_box<smarter::shared_ptr<Stream, LanePolicy>> futureMbusServer;
+
+void initializeMbusStream() {
+	auto mbusStreamOutcome = createStream();
+	if(!mbusStreamOutcome)
+		panicLogger() << "thor: Failed to create stream" << frg::endlog;
+	mbusClient.initialize(std::move(mbusStreamOutcome->get<1>()));
+	futureMbusServer.initialize(std::move(mbusStreamOutcome->get<0>()));
+}
+
+smarter::shared_ptr<Stream, LanePolicy> takeMbusServerLane() {
+	assert(futureMbusServer.valid());
+	auto lane = std::move(*futureMbusServer);
+	futureMbusServer.destruct();
+	return lane;
+}
+
+smarter::shared_ptr<Stream, LanePolicy> getMbusClientLane() {
+	return *mbusClient;
+}
 
 coroutine<frg::expected<Error, size_t>> KernelBusObject::createObject(frg::string_view name, Properties &&properties) {
 	auto [offerError, conversation] = co_await offer(*mbusClient);

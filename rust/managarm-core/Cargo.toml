@@ -1,0 +1,17 @@
+[package]
+name = "managarm-core"
+version = "0.1.0"
+edition = "2024"
+
+# The no_std part of the managarm crate: protocol bindings and data types, and
+# the protocol logic that needs nothing beyond core, alloc and an explicit hel
+# executor. freya builds on it directly; the managarm crate layers std
+# conveniences on top.
+
+[dependencies]
+bragi = { version = "0.3.2", default-features = false }
+hel = { path = "../hel", default-features = false }
+hel-sys.workspace = true
+
+[build-dependencies]
+bragi-build = "0.1"

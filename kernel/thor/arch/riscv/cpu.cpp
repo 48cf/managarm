@@ -78,6 +78,7 @@ Executor::Executor(UserContext *context, void (*launch)()) : Executor{context} {
 Executor::Executor(UserContext *context, AbiParameters abi) : Executor{context} {
 	general()->ip = abi.ip;
 	general()->sp() = abi.sp;
+	general()->a(0) = abi.argument;
 	// Note: we could use extInitial here.
 	//       However, that would require changes in the restore code path to zero the registers.
 	general()->sstatus = riscv::sstatus::extClean << riscv::sstatus::fsShift;

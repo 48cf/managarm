@@ -72,6 +72,7 @@ Executor::Executor(UserContext *context, AbiParameters abi)
 : Executor{context} {
 	general()->elr = abi.ip;
 	general()->sp = abi.sp;
+	general()->x[0] = abi.argument;
 	general()->spsr = 0;
 }
 

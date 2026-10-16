@@ -102,6 +102,7 @@ Executor::Executor(UserContext *context, AbiParameters abi)
 	general()->rip = abi.ip;
 	general()->rflags = 0x202;
 	general()->rsp = abi.sp;
+	general()->rdi = abi.argument;
 	general()->cs = kSelUserCode;
 	general()->ss = kSelUserData;
 }

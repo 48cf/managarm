@@ -1186,6 +1186,34 @@ struct HelThreadStats {
 	uint64_t userTime;
 };
 
+//! Handoff from thor to freya, the server manager.
+//!
+//! thor writes this struct into freya's address space and pre-attaches the
+//! descriptors it names into freya's universe before starting the thread. A
+//! pointer to it is passed in the first argument register; freya receives no
+//! aux vector, no environment and no interpreter.
+struct HelBootstrapData {
+	//! Read-only view covering the initrd image that freya was itself loaded
+	//! from. The view starts at a page boundary, which the image itself need
+	//! not, hence the offset below.
+	HelHandle initrdMemory;
+	//! Offset of the image within initrdMemory.
+	size_t initrdOffset;
+	//! Size of the initrd image in bytes.
+	size_t initrdSize;
+	//! Server end of the mbus lane. thor retains the client end to publish its
+	//! own mbus objects.
+	HelHandle mbusServerLane;
+	//! The token that helAccessIo(), helAccessPhysical() and helAccessIrq()
+	//! check the caller against, so that freya can grant 'access:thor.hardware'
+	//! to the servers that ask for it.
+	HelHandle hardwareAccess;
+	//! freya's own memory hierarchy, with kHelRightDerive and
+	//! kHelRightProvision. freya charges its allocations to it and extends it
+	//! to obtain hierarchies for the servers it launches.
+	HelHandle hierarchy;
+};
+
 enum {
   kHelVmexitHlt = 0,
   kHelVmexitTranslationFault = 1,

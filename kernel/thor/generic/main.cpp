@@ -470,13 +470,6 @@ void handlePageFault(FaultImageAccessor image, uintptr_t address, Word errorCode
 	}
 
 	// Otherwise, interrupt the current thread.
-	if(this_thread->flags & Thread::kFlagServer) {
-		if(!logEveryPageFault)
-			logFault();
-		urgentLogger() << "thor: Page fault in server, at " << (void *)address
-				<< ", faulting ip: " << (void *)*image.ip() << frg::endlog;
-	}
-
 	InterruptInfo info {
 		address
 	};
@@ -496,7 +489,6 @@ void handlePageFault(FaultImageAccessor image, uintptr_t address, Word errorCode
 
 void handleOtherFault(FaultImageAccessor image, Interrupt fault) {
 	assert(currentIpl() == ipl::exceptional);
-	smarter::borrowed_ptr<Thread> this_thread = getCurrentThread();
 
 	const char *name;
 	switch(fault) {
@@ -518,14 +510,7 @@ void handleOtherFault(FaultImageAccessor image, Interrupt fault) {
 		infoLogger() << "thor: Unhandled " << name << " fault"
 				<< ", faulting ip: " << (void *)*image.ip() << frg::endlog;
 
-	if(this_thread->flags & Thread::kFlagServer) {
-		urgentLogger() << "thor: " << name << " fault in server.\n"
-				<< "Last ip: " << (void *)*image.ip() << frg::endlog;
-		// TODO: Trigger a more-specific interrupt.
-		Thread::interruptCurrent(kIntrPanic, image, {});
-	}else{
-		Thread::interruptCurrent(fault, image, {});
-	}
+	Thread::interruptCurrent(fault, image, {});
 }
 
 void handleIrq(IrqImageAccessor, IrqPin *irq) {

@@ -294,10 +294,6 @@ public:
 	static void migrateOther(smarter::borrowed_ptr<Thread> thread);
 	static Error resumeOther(smarter::borrowed_ptr<Thread> thread);
 
-	enum Flags : uint32_t {
-		kFlagServer = 1
-	};
-
 	Thread(CtorToken, smarter::shared_ptr<Universe> universe,
 			smarter::shared_ptr<AddressSpace, BindableHandle> address_space,
 			AbiParameters abi);
@@ -427,8 +423,6 @@ public:
 	// TODO: Tidy this up.
 	smarter::counter _activeCtr;
 	smarter::borrowed_ptr<Thread> self;
-
-	uint32_t flags;
 
 private:
 	typedef frg::ticket_spinlock Mutex;

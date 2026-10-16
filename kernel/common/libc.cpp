@@ -2,9 +2,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <frg/printf.hpp>
-#include <frg/string.hpp>
-
 // We need to define the true memcpy / memset symbols
 // (string.h expands them to the __builtin variants).
 #undef memcpy

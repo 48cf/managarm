@@ -7,32 +7,21 @@
 #include <thor-internal/freya.hpp>
 #include <thor-internal/hierarchy.hpp>
 #include <thor-internal/load-balancing.hpp>
-#include <thor-internal/module.hpp>
 #include <thor-internal/thread.hpp>
 #include <thor-internal/universe.hpp>
 
 namespace thor {
 
-extern MfsDirectory *mfsRoot;
-
 namespace {
 
 constexpr size_t freyaStackSize = 0x10000;
 
-// Path of the freya image inside the initrd. freya is launched directly rather
-// than through svrctl, so it has no server description and no .bin file.
-constexpr const char *freyaPath = "usr/bin/freya";
-
 } // anonymous namespace
 
-coroutine<void> runFreya(smarter::shared_ptr<MemoryView> initrdView, size_t initrdOffset,
+coroutine<void> runFreya(smarter::shared_ptr<MemoryView> image,
+		smarter::shared_ptr<MemoryView> initrdView, size_t initrdOffset,
 		size_t initrdSize, smarter::shared_ptr<Stream, LanePolicy> mbusServerLane,
 		smarter::shared_ptr<Stream, LanePolicy> mbusClientLane) {
-	auto module = resolveModule(freyaPath);
-	if(!module)
-		panicLogger() << "thor: Could not find " << freyaPath << " in the initrd" << frg::endlog;
-	assert(module->type == MfsType::regular);
-
 	auto hierarchyOutcome = Hierarchy::extend(rootHierarchy(),
 			frg::string<KernelAlloc>{*kernelAlloc, "freya"});
 	if(!hierarchyOutcome)
@@ -44,14 +33,13 @@ coroutine<void> runFreya(smarter::shared_ptr<MemoryView> initrdView, size_t init
 		panicLogger() << "thor: Failed to create address space" << frg::endlog;
 	auto space = std::move(*spaceOutcome);
 
-	auto image = co_await loadModuleImage(hierarchy, space, 0,
-			static_cast<MfsRegular *>(module)->getMemory());
+	auto info = co_await loadModuleImage(hierarchy, space, 0, std::move(image));
 	// freya has to be statically linked: it provides the supercalls that mlibc's
 	// startup path issues, so anything that ran rtdl first would deadlock against
 	// the service freya is bringing up. There is also no rtdl to run it with --
 	// nothing sets up an aux vector for freya.
-	if(!image.interpreter.empty())
-		panicLogger() << "thor: " << freyaPath << " requests an interpreter,"
+	if(!info.interpreter.empty())
+		panicLogger() << "thor: usr/bin/freya requests an interpreter,"
 				" but it must be statically linked" << frg::endlog;
 
 	auto stackMemoryOutcome = AllocatedMemory::create(hierarchy, freyaStackSize);
@@ -117,7 +105,7 @@ coroutine<void> runFreya(smarter::shared_ptr<MemoryView> initrdView, size_t init
 	assert(bootstrapMapResult);
 
 	AbiParameters params;
-	params.ip = reinterpret_cast<uintptr_t>(image.entryIp);
+	params.ip = reinterpret_cast<uintptr_t>(info.entryIp);
 	// The stack is empty: freya's _start expects nothing on it, and the ABI
 	// alignment it does expect follows from the mapping being page aligned.
 	params.sp = stackMapResult.value() + freyaStackSize;

@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <elf.h>
 #include <frg/array.hpp>
 #include <frg/cmdline.hpp>
@@ -22,7 +21,6 @@
 #include <thor-internal/load-balancing.hpp>
 #include <thor-internal/main.hpp>
 #include <thor-internal/mbus.hpp>
-#include <thor-internal/module.hpp>
 #include <thor-internal/physical.hpp>
 #include <thor-internal/profile.hpp>
 #include <thor-internal/random.hpp>
@@ -41,47 +39,6 @@ static constexpr bool logEverySyscall = false;
 
 bool debugToSerial = false;
 bool debugToBochs = false;
-
-MfsDirectory *mfsRoot;
-
-// The MFS tree is only written while the initrd is parsed below, so lookups
-// need no lock.
-MfsNode *resolveModule(frg::string_view path) {
-	const char *begin = path.data();
-	const char *end = path.data() + path.size();
-	auto it = begin;
-
-	// We have no VFS. Relative paths are absolute.
-	if(it != end && *it == '/')
-		++it;
-
-	// Parse each individual component.
-	MfsNode *node = mfsRoot;
-	while(it != end) {
-		auto slash = std::find(it, end, '/');
-
-		auto component = path.sub_string(it - begin, slash - it);
-		if(component == "..") {
-			return nullptr;
-		}else if(component.size() && component != ".") {
-			// We discard multiple slashes and single-dots.
-			if(node->type != MfsType::directory)
-				return nullptr;
-			auto directory = static_cast<MfsDirectory *>(node);
-			auto target = directory->getTarget(component);
-			if(!target)
-				return nullptr;
-			node = target;
-		}
-
-		// Finally we need to skip the slash we found.
-		it = slash;
-		if(it != end)
-			++it;
-	}
-
-	return node;
-}
 
 void setupDebugging();
 
@@ -252,8 +209,9 @@ extern "C" void thorMain() {
 
 		smbios::publish();
 
-		// Parse the initrd image.
-		mfsRoot = frg::construct<MfsDirectory>(*kernelAlloc);
+		// Find freya in the initrd. Everything else in the initrd is freya's
+		// to unpack and serve.
+		smarter::shared_ptr<MemoryView> freyaImage;
 		smarter::shared_ptr<MemoryView> initrdView;
 		size_t initrdOffset = 0;
 		{
@@ -305,7 +263,10 @@ extern "C" void thorMain() {
 
 			constexpr uint32_t type_mask = 0170000;
 			constexpr uint32_t regular_type = 0100000;
-			constexpr uint32_t directory_type = 0040000;
+
+			// freya is launched directly rather than through svrctl, so it has no
+			// server description and no .bin file.
+			constexpr frg::string_view freyaPath = "usr/bin/freya";
 
 			auto parseHex = [] (const char *c, int n) {
 				uint32_t v = 0;
@@ -346,47 +307,20 @@ extern "C" void thorMain() {
 				if(path == "TRAILER!!!")
 					break;
 
-				MfsDirectory *dir = mfsRoot;
-				const char *it = path.data();
-				const char *end = path.data() + path.size();
-				while(true) {
-					auto slash = std::find(it, end, '/');
-					if(slash == end)
-						break;
-
-					auto segment = path.sub_string(it - path.data(), slash - it);
-					auto child = dir->getTarget(segment);
-					assert(child);
-					assert(child->type == MfsType::directory);
-					it = slash + 1;
-					dir = static_cast<MfsDirectory *>(child);
-				}
-
-				if((mode & type_mask) == directory_type) {
-					infoLogger() << "thor: initrd directory " << path << frg::endlog;
-
-					auto name = frg::string<KernelAlloc>{*kernelAlloc,
-							path.sub_string(it - path.data(), end - it)};
-					dir->link(frg::string<KernelAlloc>{*kernelAlloc, std::move(name)},
-							frg::construct<MfsDirectory>(*kernelAlloc));
-				}else{
-					assert((mode & type_mask) == regular_type);
-	//				if(logInitialization)
-						debugLogger() << "thor: initrd file " << path << frg::endlog;
+				if(path == freyaPath) {
+					if((mode & type_mask) != regular_type)
+						panicLogger() << "thor: " << path << " is not a regular file"
+								<< frg::endlog;
 
 					auto memoryOutcome = AllocatedMemory::create(rootHierarchy(),
 							(file_size + (kPageSize - 1)) & ~size_t{kPageSize - 1});
 					if(!memoryOutcome)
 						panicLogger() << "thor: Failed to create memory" << frg::endlog;
-					auto memory = std::move(*memoryOutcome);
-					auto copyOutcome = KernelFiber::asyncBlockCurrent(memory->copyTo(0,
+					freyaImage = std::move(*memoryOutcome);
+					auto copyOutcome = KernelFiber::asyncBlockCurrent(freyaImage->copyTo(0,
 							data, file_size));
 					assert(copyOutcome);
-
-					auto name = frg::string<KernelAlloc>{*kernelAlloc,
-							path.sub_string(it - path.data(), end - it)};
-					dir->link(std::move(name), frg::construct<MfsRegular>(*kernelAlloc,
-							std::move(memory), file_size));
+					break;
 				}
 
 				p = data + ((file_size + 3) & ~uint32_t{3});
@@ -404,8 +338,10 @@ extern "C" void thorMain() {
 		initializeKernletCtl();
 		// freya launches mbus and the boot servers. thor's own mbus objects,
 		// created above, are published once mbus runs.
-		KernelFiber::asyncBlockCurrent(runFreya(std::move(initrdView), initrdOffset,
-				initrdNote->length, takeMbusServerLane(), getMbusClientLane()));
+		if(!freyaImage)
+			panicLogger() << "thor: Could not find usr/bin/freya in the initrd" << frg::endlog;
+		KernelFiber::asyncBlockCurrent(runFreya(std::move(freyaImage), std::move(initrdView), initrdOffset, initrdNote->length,
+				takeMbusServerLane(), getMbusClientLane()));
 	});
 
 	Scheduler::resume(getCpuData()->wqFiber);

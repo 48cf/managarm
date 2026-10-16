@@ -42,6 +42,7 @@ src = files(
 	'generic/cancel.cpp',
 	'generic/credentials.cpp',
 	'generic/debug.cpp',
+	'generic/elf-loader.cpp',
 	'generic/event.cpp',
 	'generic/executor-context.cpp',
 	'generic/fiber.cpp',

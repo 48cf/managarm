@@ -64,6 +64,7 @@ extern "C" fn freya_main(bootstrap: *const hel_sys::HelBootstrapData) -> ! {
     allocator::init(bootstrap.hierarchy);
 
     vfs::unpack_initrd(bootstrap.hierarchy, map_initrd(bootstrap));
+    vfs::add_device_nodes();
     info!("freya: unpacked the initrd");
 
     // Stage 0 has nothing to serve the tree to yet, so prove it is usable by
@@ -72,7 +73,7 @@ extern "C" fn freya_main(bootstrap: *const hel_sys::HelBootstrapData) -> ! {
         Some(vfs::VfsNode::File(file)) => {
             info!("freya: usr/bin/freya is {} bytes in the vfs", file.len());
         }
-        Some(vfs::VfsNode::Directory(_)) => panic!("freya: usr/bin/freya is a directory"),
+        Some(_) => panic!("freya: usr/bin/freya is not a regular file"),
         None => panic!("freya: usr/bin/freya is missing from the vfs"),
     }
 

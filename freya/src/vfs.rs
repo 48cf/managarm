@@ -13,7 +13,7 @@ use alloc::{
 };
 
 use hel::{Handle, Mapping, MappingFlags};
-use spin::{Lazy, Mutex};
+use spin::{LazyLock, Mutex};
 
 /// Page size, which `helCopyOnWrite` requires its size to be a multiple of.
 const PAGE_SIZE: usize = 0x1000;
@@ -21,6 +21,17 @@ const PAGE_SIZE: usize = 0x1000;
 #[derive(Default)]
 pub struct VfsDirectory {
     entries: Mutex<BTreeMap<String, Arc<VfsNode>>>,
+}
+
+impl VfsDirectory {
+    /// Returns the directory's entries, in name order.
+    pub fn entries(&self) -> Vec<(String, Arc<VfsNode>)> {
+        self.entries
+            .lock()
+            .iter()
+            .map(|(name, node)| (name.clone(), node.clone()))
+            .collect()
+    }
 }
 
 pub struct VfsFile {
@@ -47,14 +58,16 @@ impl VfsFile {
 pub enum VfsNode {
     Directory(VfsDirectory),
     File(VfsFile),
+    /// `/dev/urandom`, whose reads are served from the kernel's entropy pool.
+    Urandom,
 }
 
-static ROOT: Lazy<Arc<VfsNode>> =
-    Lazy::new(|| Arc::new(VfsNode::Directory(VfsDirectory::default())));
+static ROOT: LazyLock<Arc<VfsNode>> =
+    LazyLock::new(|| Arc::new(VfsNode::Directory(VfsDirectory::default())));
 
 /// The kernel's shared zero-filled memory object, used as the source every
 /// file's copy-on-write memory is branched from.
-static ZERO_MEMORY: Lazy<Handle> = Lazy::new(|| {
+static ZERO_MEMORY: LazyLock<Handle> = LazyLock::new(|| {
     let mut handle = hel_sys::kHelNullHandle as hel_sys::HelHandle;
     // SAFETY: `handle` is a valid out-parameter.
     let error = unsafe {
@@ -203,15 +216,27 @@ pub fn unpack_initrd(hierarchy: hel_sys::HelHandle, initrd: &[u8]) {
     }
 }
 
+/// Splits a path into the components that name something, the way thor's
+/// MFS did: there is no working directory, so every path is relative to the
+/// root, and empty and `.` components are skipped. `..` is not supported and
+/// makes the path invalid.
+fn components(path: &str) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => return None,
+            part => parts.push(part),
+        }
+    }
+    Some(parts)
+}
+
 /// Resolves a path against the root of the tree.
 pub fn lookup(path: &str) -> Option<Arc<VfsNode>> {
     let mut current = ROOT.clone();
 
-    for part in path.split('/') {
-        if part.is_empty() || part == "." {
-            continue;
-        }
-
+    for part in components(path)? {
         let VfsNode::Directory(directory) = &*current else {
             return None;
         };
@@ -221,4 +246,78 @@ pub fn lookup(path: &str) -> Option<Arc<VfsNode>> {
     }
 
     Some(current)
+}
+
+/// What [`upload`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadOutcome {
+    /// The file did not exist and was created with the uploaded contents.
+    Created,
+    /// A file already existed at the path and was left alone. Its size is
+    /// reported so that the caller can detect conflicting uploads.
+    Exists { size: usize },
+    /// The path is invalid, or one of its components is not a directory.
+    Invalid,
+}
+
+/// Creates a regular file at `path` with the given contents, creating missing
+/// directories on the way. An existing file is never replaced: servers upload
+/// the files they depend on before launching each other, and two uploads of
+/// the same path are expected to carry the same data.
+pub fn upload(hierarchy: hel_sys::HelHandle, path: &str, contents: &[u8]) -> UploadOutcome {
+    let Some(parts) = components(path) else {
+        return UploadOutcome::Invalid;
+    };
+    let Some((name, parents)) = parts.split_last() else {
+        return UploadOutcome::Invalid;
+    };
+
+    let mut current = ROOT.clone();
+    for &part in parents {
+        let VfsNode::Directory(directory) = &*current else {
+            return UploadOutcome::Invalid;
+        };
+        let next = directory
+            .entries
+            .lock()
+            .entry(part.to_string())
+            .or_insert_with(|| Arc::new(VfsNode::Directory(VfsDirectory::default())))
+            .clone();
+        current = next;
+    }
+
+    let VfsNode::Directory(directory) = &*current else {
+        return UploadOutcome::Invalid;
+    };
+    if let Some(existing) = directory.entries.lock().get(*name) {
+        return match &**existing {
+            VfsNode::File(file) => UploadOutcome::Exists { size: file.len() },
+            _ => UploadOutcome::Invalid,
+        };
+    }
+
+    // Copy before taking the lock again; freya is single-threaded, so nothing
+    // can insert the same name in between.
+    let file = VfsNode::File(VfsFile {
+        memory_handle: memory_for(hierarchy, contents),
+        length: contents.len(),
+    });
+    directory
+        .entries
+        .lock()
+        .insert(name.to_string(), Arc::new(file));
+    UploadOutcome::Created
+}
+
+/// Adds the device nodes that thor's POSIX emulation provided next to the
+/// initrd. Must run after the initrd is unpacked.
+pub fn add_device_nodes() {
+    let dev = parent_directory(&["dev"]);
+    let VfsNode::Directory(directory) = &*dev else {
+        panic!("freya: /dev is not a directory");
+    };
+    directory
+        .entries
+        .lock()
+        .insert("urandom".to_string(), Arc::new(VfsNode::Urandom));
 }
